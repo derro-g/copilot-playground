@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#e9f3f4" />
+    <title>Quickfire | Join a test</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="firebase.css" />
+    <script type="module" src="firebase-app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="Quickfire home"><span class="brand-mark" aria-hidden="true">Q</span><span>quickfire</span></a>
+      <div class="secure-header-actions">
+        <span id="teacher-session-label" hidden></span>
+        <button class="teacher-login-trigger" id="teacher-login-open" type="button">Teacher sign in</button>
+        <button class="teacher-login-trigger" id="teacher-logout" type="button" hidden>Sign out</button>
+      </div>
+    </header>
+
+    <main class="app-shell secure-shell">
+      <section class="workspace-screen secure-student-screen" id="student-side" aria-labelledby="join-title">
+        <div class="workspace-heading secure-heading">
+          <div>
+            <p class="eyebrow"><span class="eyebrow-dot"></span> READY WHEN YOU ARE</p>
+            <h1 id="join-title">One code.<br /><em>One good test.</em></h1>
+            <p class="intro-description">Enter the code your teacher shared, add your name, and take the test.</p>
+          </div>
+          <div class="student-aside" aria-hidden="true"><span>QF</span><strong>Take a breath.<br />Trust what you know.</strong><i>✳</i></div>
+        </div>
+        <section class="join-panel" aria-labelledby="join-panel-title">
+          <p class="section-kicker">JOIN A SESSION</p>
+          <h2 id="join-panel-title">Your test starts here</h2>
+          <form id="student-join-form">
+            <label for="student-code">6-character test code</label>
+            <input id="student-code" name="code" type="text" inputmode="text" autocomplete="off" autocapitalize="characters" maxlength="6" pattern="[A-HJ-NP-Z2-9]{6}" placeholder="ABC234" required />
+            <label for="student-display-name">Your name</label>
+            <input id="student-display-name" name="name" type="text" maxlength="60" autocomplete="name" placeholder="First and last name" required />
+            <p class="secure-message" id="student-join-message" role="status" aria-live="polite"></p>
+            <button class="primary-button join-button" id="join-session-button" type="submit">Join test <span aria-hidden="true">→</span></button>
+          </form>
+        </section>
+        <footer class="page-footer">Your answers are only visible to your teacher.</footer>
+      </section>
+
+      <section class="workspace-screen teacher-workspace" id="teacher-side" hidden aria-labelledby="teacher-title">
+        <div class="teacher-heading">
+          <div><p class="eyebrow"><span class="eyebrow-dot"></span> PRIVATE TEACHER WORKSPACE</p><h1 id="teacher-title">Your tests.<br /><em>Your sessions.</em></h1></div>
+          <p class="teacher-intro">Build reusable tests, open a session when you’re ready, and review results as students finish.</p>
+        </div>
+
+        <div class="teacher-cloud-layout">
+          <section class="builder-panel" aria-labelledby="tests-title">
+            <div class="section-heading"><div><p class="section-kicker">REUSABLE QUESTION SETS</p><h2 id="tests-title">Tests</h2></div><div class="cloud-heading-actions"><button class="small-button secondary-small" id="create-sample-test" type="button">Add sample</button><button class="small-button" id="new-test-button" type="button">New test</button></div></div>
+            <form id="test-settings-form" class="cloud-form" hidden>
+              <label for="test-title-input">Test title</label>
+              <input id="test-title-input" maxlength="100" placeholder="e.g. Biology: cells" required />
+              <div class="form-two-column">
+                <div><label for="test-feedback-mode">Feedback</label><select id="test-feedback-mode"><option value="immediate">After each answer</option><option value="end">At the end</option></select></div>
+                <div class="cloud-toggle-stack"><label><input id="test-speed-bonus" type="checkbox" checked /> Speed bonus</label><label><input id="test-no-time-limit" type="checkbox" /> No time limit</label></div>
+              </div>
+              <div class="inline-form-row"><button class="primary-button" type="submit">Save test</button><button class="secondary-button" id="cancel-test-edit" type="button">Cancel</button></div>
+            </form>
+            <div class="cloud-test-list" id="cloud-test-list"></div>
+            <p class="empty-state" id="no-tests-message" hidden>No tests yet. Create a reusable test to begin.</p>
+            <button class="secondary-button import-legacy-button" id="import-local-tests" type="button" hidden>Import tests from this browser</button>
+            <p class="secure-message" id="teacher-message" role="status" aria-live="polite"></p>
+          </section>
+
+          <section class="question-list-panel" aria-labelledby="question-editor-title">
+            <div class="section-heading"><div><p class="section-kicker">SELECTED TEST</p><h2 id="question-editor-title">Questions</h2></div><span class="quiz-count" id="selected-test-total"></span></div>
+            <p class="empty-state" id="select-test-message">Choose or create a test to edit its questions.</p>
+            <div id="test-question-list" class="teacher-question-list"></div>
+            <form id="cloud-question-form" class="cloud-form" hidden>
+              <h3 id="question-form-heading">Add a question</h3>
+              <label for="question-prompt">Question</label>
+              <textarea id="question-prompt" rows="3" maxlength="1000" required></textarea>
+              <div class="form-two-column">
+                <div><label for="question-type">Answer type</label><select id="question-type"><option value="choice">Multiple choice</option><option value="multi">Select all that apply</option><option value="truefalse">True or false</option><option value="short">Short answer</option><option value="number">Number</option><option value="written">Written explanation</option></select></div>
+                <div><label for="question-marks">Marks</label><select id="question-marks"><option value="2">2 marks</option><option value="5">5 marks</option><option value="10">10 marks</option></select></div>
+              </div>
+              <label for="question-time">Time limit</label><select id="question-time"><option value="15">15 seconds</option><option value="30">30 seconds</option><option value="60">1 minute</option><option value="90">1 minute 30 seconds</option><option value="120">2 minutes</option></select>
+              <div id="question-type-editor"></div>
+              <label for="question-explanation">Explanation <span class="optional-label">optional</span></label><textarea id="question-explanation" rows="2" maxlength="1000"></textarea>
+              <label for="question-option-feedback">Per-option feedback <span class="optional-label">optional, one per line</span></label><textarea id="question-option-feedback" rows="3" maxlength="2000" placeholder="One line for each option"></textarea>
+              <label for="question-guidance">Teacher marking guidance <span class="optional-label">written answers</span></label><textarea id="question-guidance" rows="2" maxlength="1000"></textarea>
+              <p class="secure-message" id="question-editor-message" role="status"></p>
+              <div class="inline-form-row"><button class="primary-button" id="save-question-button" type="submit">Add question</button><button class="secondary-button" id="cancel-question-edit" type="button" hidden>Cancel edit</button></div>
+            </form>
+            <button class="secondary-button add-cloud-question" id="add-question-button" type="button" hidden>Add question</button>
+          </section>
+
+          <section class="question-list-panel session-panel" aria-labelledby="sessions-title">
+            <div class="section-heading"><div><p class="section-kicker">LIVE AND PAST</p><h2 id="sessions-title">Sessions</h2></div></div>
+            <form id="create-session-form" class="session-create-form">
+              <label for="session-test-select">Create a session from a test</label>
+              <div class="inline-form-row"><select id="session-test-select" required></select><button class="primary-button" type="submit">Open session</button></div>
+            </form>
+            <div class="session-list" id="session-list"></div>
+            <p class="empty-state" id="no-sessions-message">Sessions you create will appear here.</p>
+          </section>
+
+          <section class="review-panel session-results-panel" id="session-results-panel" hidden aria-labelledby="session-results-title">
+            <div class="section-heading"><div><p class="section-kicker">SESSION RESULTS</p><h2 id="session-results-title">Students</h2></div><button class="small-button" id="export-csv-button" type="button">Export CSV</button></div>
+            <div class="attempt-table-wrap"><table class="attempt-table"><thead><tr><th>Student</th><th>Score</th><th>Status</th><th>Submitted</th><th>Written answers</th></tr></thead><tbody id="session-attempts-body"></tbody></table></div>
+            <p class="empty-state" id="no-attempts-message">No students have joined this session yet.</p>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <dialog class="quiz-modal" id="student-quiz-dialog">
+      <div class="modal-shell">
+        <div class="modal-topbar"><div><p class="section-kicker" id="active-session-code"></p><h2 id="active-session-title"></h2></div><button class="icon-button" id="exit-session" type="button" aria-label="Leave test">×</button></div>
+        <section id="student-question-screen"><div class="modal-progress-row"><span id="student-question-count"></span><span class="modal-points" id="student-question-marks"></span></div><div class="modal-progress-track"><span id="student-question-progress"></span></div><div class="modal-timer-row" id="student-timer-row"><span id="student-time-text"></span><strong id="student-timer"></strong></div><div class="modal-question-copy"><p class="question-kicker" id="student-question-type"></p><h1 id="student-question-prompt"></h1></div><div id="student-answer-controls" class="modal-answer-grid"></div><p id="student-answer-feedback" class="modal-answer-feedback" aria-live="polite"></p><div class="student-next-row"><button class="primary-button" id="student-submit-answer" type="button" disabled>Submit answer <span aria-hidden="true">→</span></button></div></section>
+        <section id="student-result-screen" hidden><p class="eyebrow"><span class="eyebrow-dot"></span> TEST COMPLETE</p><h1>Your result,<br /><em>saved.</em></h1><p id="student-result-summary" class="intro-description"></p><div id="student-end-feedback" class="end-feedback-list" hidden></div><button class="primary-button" id="student-done-button" type="button">Done <span aria-hidden="true">→</span></button></section>
+      </div>
+    </dialog>
+
+    <dialog class="teacher-login-dialog" id="teacher-login-dialog">
+      <form id="teacher-login-form" class="teacher-login-form">
+        <div class="section-heading"><div><p class="section-kicker">TEACHER ACCESS</p><h2>Sign in</h2></div><button class="icon-button" id="teacher-login-close" type="button" aria-label="Close sign in">×</button></div>
+        <p class="intro-description">Only an account authorized by the site owner can open the teacher workspace.</p>
+        <label for="teacher-email">Email</label><input id="teacher-email" type="email" autocomplete="username" required />
+        <label for="teacher-password">Password</label><input id="teacher-password" type="password" autocomplete="current-password" required />
+        <p id="teacher-login-message" class="secure-message" role="status" aria-live="polite"></p>
+        <button class="primary-button" type="submit">Sign in <span aria-hidden="true">→</span></button>
+      </form>
+    </dialog>
+  </body>
+</html>

@@ -1,0 +1,102 @@
+[hidden] { display: none !important; }
+.secure-header-actions { display: flex; align-items: center; gap: 12px; }
+#teacher-session-label { color: var(--muted); font-size: 0.78rem; }
+.teacher-login-trigger { min-height: 38px; padding: 0 14px; border: 1px solid #cbd8db; border-radius: 5px; color: var(--ink); background: rgba(255,255,255,.6); cursor: pointer; font-size: .79rem; font-weight: 700; }
+.teacher-login-trigger:hover { background: white; }
+.secure-shell { width: min(100% - 40px, 1120px); }
+.secure-heading { padding-bottom: 25px; }
+.join-panel { width: min(100%, 500px); padding: 25px; border: 1px solid var(--line); border-radius: 7px; background: rgba(255,255,255,.78); box-shadow: 0 12px 35px rgba(24,49,58,.06); }
+.join-panel h2 { margin: 7px 0 20px; }
+.join-panel form, .teacher-login-form, .cloud-form { display: grid; gap: 10px; }
+.join-panel label, .teacher-login-form label, .cloud-form label, .session-create-form label { margin-top: 5px; color: var(--ink); font-size: .77rem; font-weight: 700; }
+.join-panel input, .teacher-login-form input, .cloud-form input, .cloud-form textarea, .cloud-form select, .session-create-form select, .session-create-form input, .cloud-type-fields input, .cloud-type-fields textarea, .cloud-type-fields select {
+  width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid #cbd8db; border-radius: 5px; color: var(--ink); background: var(--white); font: inherit; font-size: .83rem;
+}
+.join-panel input:focus, .teacher-login-form input:focus, .cloud-form input:focus, .cloud-form textarea:focus, .cloud-form select:focus, .session-create-form select:focus, .cloud-type-fields input:focus, .cloud-type-fields textarea:focus { border-color: var(--blue); outline: 2px solid rgba(69,101,223,.16); }
+.join-panel #student-code { text-transform: uppercase; font-family: "Space Grotesk", sans-serif; font-size: 1.2rem; font-weight: 700; letter-spacing: .08em; }
+.join-button { width: 100%; margin-top: 8px; justify-content: space-between; }
+.secure-message { min-height: 1.2em; margin: 2px 0; color: var(--muted); font-size: .76rem; line-height: 1.45; }
+.secure-message.is-error { color: #a74438; }
+.teacher-workspace { padding-top: 4px; }
+.teacher-cloud-layout { display: grid; grid-template-columns: minmax(280px, .86fr) minmax(360px, 1.14fr); align-items: start; gap: 15px; }
+.session-panel, .session-results-panel { grid-column: 1 / -1; }
+.teacher-cloud-layout > .builder-panel, .teacher-cloud-layout > .question-list-panel, .teacher-cloud-layout > .session-panel, .teacher-cloud-layout > .session-results-panel { min-width: 0; }
+.cloud-form { padding: 15px; border: 1px solid var(--line); border-radius: 6px; background: rgba(255,255,255,.64); }
+.cloud-form h3 { margin: 0 0 3px; font-family: "Space Grotesk", sans-serif; font-size: 1rem; }
+.cloud-form textarea { resize: vertical; line-height: 1.5; }
+.cloud-form .form-two-column { gap: 10px; }
+.cloud-form .form-two-column > div { min-width: 0; }
+.cloud-form .form-two-column label { display: block; margin: 0 0 6px; }
+.cloud-form .inline-form-row { margin-top: 6px; }
+.cloud-toggle-stack { display: grid; align-content: center; gap: 9px; }
+.cloud-toggle-stack label { display: flex; align-items: center; gap: 7px; font-weight: 600; }
+.cloud-toggle-stack input { width: auto; min-height: 0; accent-color: var(--green-dark); }
+.cloud-test-list, .session-list { display: grid; gap: 8px; margin-top: 13px; }
+.cloud-heading-actions { display: flex; gap: 6px; }
+.cloud-test-row, .cloud-session-row { min-width: 0; padding: 12px; display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 6px; background: rgba(255,255,255,.7); }
+.cloud-test-row strong, .cloud-session-row strong { display: block; font-size: .82rem; }
+.cloud-test-row span, .cloud-session-row span { display: block; margin-top: 4px; color: var(--muted); font-size: .68rem; }
+.cloud-row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.cloud-row-actions button, .cloud-row-actions a { min-height: 32px; padding: 0 9px; display: inline-flex; align-items: center; border: 1px solid #cbd8db; border-radius: 4px; color: var(--ink); background: transparent; cursor: pointer; font-size: .68rem; font-weight: 700; text-decoration: none; }
+.cloud-row-actions button:hover, .cloud-row-actions a:hover { background: white; }
+.cloud-row-actions .danger-button { color: #a74438; }
+.cloud-test-row.is-selected { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(69,101,223,.1); }
+.cloud-test-row button.test-title-button { padding: 0; border: 0; color: var(--ink); background: transparent; cursor: pointer; text-align: left; }
+.cloud-question-row { grid-template-columns: 29px minmax(0,1fr) auto; }
+.cloud-question-row .teacher-question-content strong { overflow-wrap: anywhere; }
+.session-code { color: var(--blue) !important; font-family: "Space Grotesk",sans-serif; font-size: 1rem !important; font-weight: 700; letter-spacing: .1em; }
+.session-status { width: max-content; padding: 4px 7px; border-radius: 4px; color: var(--green-dark) !important; background: var(--soft-green); font-size: .58rem !important; font-weight: 800; text-transform: uppercase; }
+.session-status.is-closed { color: var(--muted) !important; background: #edf0f0; }
+.session-create-form { padding: 14px; border-radius: 6px; background: #edf4f3; }
+.session-create-form .inline-form-row { margin-top: 7px; }
+.import-legacy-button { width: 100%; margin-top: 12px; }
+.question-type-fields { display: grid; gap: 9px; padding: 12px; border-radius: 5px; background: #f0f5f4; }
+.question-type-fields label { display: block; }
+.cloud-type-fields { display: grid; gap: 9px; }
+.cloud-type-help { margin: -2px 0 0; color: var(--muted); font-size: .68rem; line-height: 1.4; }
+.attempt-table-wrap { width: 100%; overflow-x: auto; }
+.attempt-table { width: 100%; border-collapse: collapse; font-size: .76rem; }
+.attempt-table th, .attempt-table td { padding: 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.attempt-table th { color: var(--muted); font-size: .65rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.attempt-table td { line-height: 1.45; }
+.attempt-table textarea { width: 140px; min-height: 54px; padding: 7px; border: 1px solid var(--line); border-radius: 4px; font: inherit; }
+.grade-written { min-height: 31px; margin-top: 4px; padding: 0 8px; border: 1px solid #cbd8db; border-radius: 4px; background: white; cursor: pointer; font-size: .68rem; }
+.teacher-login-dialog, .quiz-modal { max-width: calc(100% - 24px); border: 1px solid rgba(24,49,58,.16); border-radius: 9px; color: var(--ink); background: #f8fbfa; box-shadow: 0 24px 80px rgba(12,33,42,.28); }
+.teacher-login-dialog { width: min(440px, calc(100% - 24px)); padding: 24px; }
+.teacher-login-dialog::backdrop, .quiz-modal::backdrop { background: rgba(16,37,45,.72); backdrop-filter: blur(5px); }
+.teacher-login-form .section-heading { align-items: center; margin-bottom: 2px; }
+.teacher-login-form .intro-description { margin: 0 0 4px; font-size: .83rem; }
+.teacher-login-form .primary-button { justify-content: space-between; margin-top: 7px; }
+.student-next-row { margin-top: 17px; display: flex; justify-content: flex-end; }
+.modal-answer-feedback { min-height: 1.4em; margin: 12px 0 0; color: var(--muted); font-size: .82rem; line-height: 1.5; }
+.modal-answer-feedback.is-correct { color: var(--green-dark); font-weight: 700; }
+.modal-answer-feedback.is-wrong { color: #a74438; font-weight: 700; }
+.modal-answer-feedback.is-pending { color: #8b5724; font-weight: 700; }
+.modal-answer-feedback.is-muted { color: var(--muted); }
+.choice-select-hint { margin: 0 0 9px; color: var(--muted); font-size: .72rem; }
+.student-answer-option.is-selected { border-color: var(--ink); box-shadow: 0 0 0 3px rgba(69,101,223,.2); }
+.student-answer-option.is-correct { border-color: var(--ink); box-shadow: 0 0 0 3px rgba(44,154,114,.2); }
+.student-answer-option.is-incorrect { opacity: .68; }
+.student-answer-input { width: 100%; min-height: 48px; padding: 10px 12px; border: 1px solid #cbd8db; border-radius: 5px; color: var(--ink); background: white; font: inherit; }
+.student-answer-input.text-long { min-height: 132px; resize: vertical; }
+.student-answer-input:disabled { background: #edf2f1; }
+.session-result-heading { margin: 20px 0 8px; font-family: "Space Grotesk",sans-serif; font-size: 2.4rem; }
+.written-review-cell { min-width: 180px; white-space: pre-wrap; }
+@media (max-width: 760px) {
+  .teacher-cloud-layout { grid-template-columns: 1fr; }
+  .teacher-cloud-layout > .session-panel, .teacher-cloud-layout > .session-results-panel { grid-column: auto; }
+  .secure-heading { grid-template-columns: 1fr; }
+  .secure-heading .student-aside { display: none; }
+}
+@media (max-width: 520px) {
+  .secure-shell { width: min(100% - 32px, 1120px); }
+  .secure-header-actions { gap: 6px; }
+  #teacher-session-label { max-width: 108px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .teacher-login-trigger { padding: 0 9px; font-size: .7rem; }
+  .join-panel { padding: 18px; }
+  .cloud-test-row, .cloud-session-row { grid-template-columns: 1fr; }
+  .cloud-heading-actions { align-items: flex-end; flex-direction: column; }
+  .cloud-row-actions { justify-content: flex-start; }
+  .cloud-form .form-two-column { grid-template-columns: 1fr; }
+  .teacher-login-dialog { padding: 17px; }
+}
