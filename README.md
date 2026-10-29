@@ -1,60 +1,54 @@
 # Quickfire
 
-Quickfire is a static GitHub Pages quiz site backed by Firebase Authentication, Cloud Firestore, and callable Cloud Functions. Students join one session with a code and name; teachers sign in to manage reusable tests, sessions, and results.
+Quickfire is a static GitHub Pages quiz site backed by Firebase Authentication and Cloud Firestore. Its modular Firebase Web SDK imports load directly from Google's CDN; there is no frontend build step or Cloud Functions backend.
+
+## Spark-plan behavior
+
+- Teachers sign in with Email/Password and must have an administrator-created `teacherUsers/{uid}` document.
+- Students use Firebase Anonymous Authentication and join with a 12-character code.
+- The browser writes quiz sessions and answers directly to Firestore. Security Rules allow students to read only public question documents and submit their own responses.
+- Correct answers remain in teacher-only `answerKeys` documents. To keep them private without a trusted backend, this Spark version does **not** automatically grade answers; teachers review and mark each response.
+- The question timer is only displayed in the student's browser. Without a trusted server, students can bypass it. Do not use this version for high-stakes or proctored tests.
+- 12-character codes reduce guessing risk, but direct client access has no server-side rate limiting.
 
 ## Firestore structure
 
 - `teacherUsers/{uid}`: administrator-managed teacher allowlist. The app cannot grant teacher access.
-- `tests/{testId}`: reusable test metadata and settings.
-- `tests/{testId}/questions/{questionId}`: authored questions and answer keys, readable only by an authorized teacher.
-- `sessionCodes/{code}`: private reservation mapping from a six-character code to a session.
-- `sessions/{sessionId}`: one run of a test, with owner, code, status, scoring settings, and maximum marks.
-- `sessions/{sessionId}/publicQuestions/{questionId}`: prompts and options only. Students receive these from the join callable while the session is open.
-- `sessions/{sessionId}/answerKeys/{questionId}`: private answer-key snapshot. Firestore rules deny all client access.
-- `sessions/{sessionId}/attempts/{anonymousUid}`: student name, progress, score, status, and timestamps.
-- `sessions/{sessionId}/attempts/{anonymousUid}/responses/{questionId}`: submitted answer, grade, and post-submission feedback. Only the session's teacher can read response documents; student feedback is returned by callable Functions after submission.
-- `joinRateLimits/{hash}`: server-only rate-limit counters for failed code lookups.
+- `tests/{testId}` and `tests/{testId}/questions/{questionId}`: teacher-owned reusable tests and their answer keys.
+- `sessionCodes/{code}`: 12-character code-to-session mapping. Students may get a single code document but cannot list codes.
+- `sessions/{sessionId}`: session metadata, owner, status, and maximum marks.
+- `sessions/{sessionId}/publicQuestions/{questionId}`: prompts/options available to signed-in anonymous students while the session is open.
+- `sessions/{sessionId}/answerKeys/{questionId}`: private answer-key snapshots readable only by the session's teacher.
+- `sessions/{sessionId}/attempts/{anonymousUid}`: student name and submission status.
+- `sessions/{sessionId}/attempts/{anonymousUid}/responses/{questionId}`: submitted answer and teacher-entered mark. Students cannot read response documents.
 
-## Security and grading
+The rules in `firestore.rules` enforce these access boundaries. Never leave the database in **Test Mode**: Test Mode permits broad access and can expose or allow modification of student data and answer keys.
 
-Students use Firebase Anonymous Authentication, giving Firestore rules a per-attempt UID without requiring student accounts. Teachers use Email/Password Authentication and must also have a `teacherUsers/{uid}` allowlist document.
+## Firebase setup (no Node.js or CLI required)
 
-Firestore rules cannot hide selected fields from an otherwise-readable document. Therefore the browser never reads answer keys. `createSession` copies prompts/options to a public snapshot and answer keys to a private snapshot. `joinSession` validates the code and returns only the public snapshot. `startQuestion` records a server timestamp; `submitAnswer` grades from that timestamp rather than trusting the browser clock. `finishAttempt` releases end-of-test feedback only after every response is submitted. `gradeWrittenResponse` applies teacher marks on the server. `createSampleTest` seeds a six-type sample without including its answer key in the browser bundle.
-
-Cloud Functions require the Firebase project to use the Blaze billing plan. The Pages workflow publishes only the static client files; the Functions source and Firestore rules are excluded from the Pages artifact.
-
-## Exact Firebase setup
-
-1. Create a Firebase project and a Cloud Firestore database.
-2. Enable **Authentication → Sign-in method → Email/Password** and **Anonymous**.
-3. Register a Firebase Web App. Copy its `apiKey`, `authDomain`, `projectId`, and `appId` into `firebase-config.js`. These web config values are public. Never put a service-account key or Admin SDK credentials in the client project.
-4. In **Authentication → Users**, create your teacher's email/password account. Copy the user's UID. In Firestore, create `teacherUsers/{UID}` with a field such as `authorized: true`. Only an administrator should create this allowlist document.
-5. Add the GitHub Pages domain to **Authentication → Settings → Authorized domains** after Pages is published. Add `localhost` for local testing if it is not already listed.
-6. Install Node.js 20 and the Firebase CLI. In a terminal, from this project folder (`copilot-playground`), select your Firebase project and deploy the backend:
+1. In the [Firebase Console](https://console.firebase.google.com/), select project `quikfire-1`. Keep it on the **Spark** plan if you want to avoid linking a billing account. Firebase services still have usage quotas and limits.
+2. In **Authentication → Sign-in method**, enable **Email/Password** and **Anonymous**.
+3. In **Authentication → Users**, create your teacher account. Copy its UID.
+4. In **Firestore → Data**, create `teacherUsers/{UID}` (replace `{UID}` with the copied UID). Add a Boolean field such as `authorized: true`. Do this before publishing the restrictive rules because the rules intentionally block clients from creating teacher access.
+5. In **Firestore → Rules**, replace the Test Mode rules with the complete contents of `firestore.rules`, then click **Publish**. Do this before using the live site. The app's answer keys and student data are not safe while Test Mode rules remain active.
+6. In **Project settings → Your apps**, register a Web App and confirm its configuration. The config in `firebase-config.js` uses project `quikfire-1`; its `authDomain` should be `quikfire-1.firebaseapp.com`. Web app config values, including the API key, are public identifiers, not server credentials.
+7. In **Authentication → Settings → Authorized domains**, add `derro-g.github.io` (domain only, no path).
+8. Publish the site change from the project folder:
 
    ```powershell
-   npm install --global firebase-tools
-   firebase login
-   firebase use --add
-   cd functions
-   npm install
-   cd ..
-   firebase deploy --only firestore:rules,firestore:indexes,functions
+   git add -A
+   git commit -m "Connect Quickfire to Firebase Spark"
+   git push
    ```
 
-7. Restrict the Firebase web API key to your GitHub Pages domain and localhost in Google Cloud Console. The key itself is not a secret; Firestore rules and server Functions enforce access.
+   GitHub Pages will redeploy from `main`. No Functions deployment, Node.js install, or frontend build is needed.
+9. Open [the deployed site](https://derro-g.github.io/copilot-playground/), sign in as the teacher, create a test, and open a session. Use its 12-character code in a separate private/incognito window to verify the student flow.
 
-## GitHub Pages setup
+If Firestore reports a missing index for a teacher query, follow the error's link in the browser to create the requested index in the Firebase Console.
 
-This project has `.github/workflows/pages.yml`. Publish the **contents of this `copilot-playground` folder as the repository root** so the workflow is at `.github/workflows/pages.yml` and its static file paths match.
+## GitHub Pages
 
-1. Create a GitHub repository and push this project's files to its `main` branch. Do not commit `functions/node_modules` or credentials.
-2. In **Repository Settings → Pages**, set **Source** to **GitHub Actions**.
-3. The workflow deploys on pushes to `main` (or run it manually from **Actions**). If your default branch is named differently, update the workflow branch filter.
-4. Add the resulting `https://<account>.github.io` host to Firebase Auth's authorized domains.
-5. Share the Pages URL with students. They enter a code and name, or use the teacher's copied link with `?code=ABC234`.
-
-The Pages workflow intentionally copies only `index.html`, `secure.html`, `styles.css`, `firebase.css`, `firebase-app.js`, and `firebase-config.js` into the site artifact. Firebase rules and Functions need a separate Firebase CLI deploy after changes.
+The workflow at `.github/workflows/pages.yml` publishes only the static website files. Firestore Rules are not deployed by that workflow; after changing `firestore.rules`, publish the file manually in **Firestore → Rules**.
 
 ## Existing local quizzes
 

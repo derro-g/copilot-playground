@@ -33,15 +33,15 @@
           <p class="section-kicker">JOIN A SESSION</p>
           <h2 id="join-panel-title">Your test starts here</h2>
           <form id="student-join-form">
-            <label for="student-code">6-character test code</label>
-            <input id="student-code" name="code" type="text" inputmode="text" autocomplete="off" autocapitalize="characters" maxlength="6" pattern="[A-HJ-NP-Z2-9]{6}" placeholder="ABC234" required />
+            <label for="student-code">12-character test code</label>
+            <input id="student-code" name="code" type="text" inputmode="text" autocomplete="off" autocapitalize="characters" maxlength="12" pattern="[A-HJ-NP-Z2-9]{12}" placeholder="ABC234DEF567" required />
             <label for="student-display-name">Your name</label>
             <input id="student-display-name" name="name" type="text" maxlength="60" autocomplete="name" placeholder="First and last name" required />
             <p class="secure-message" id="student-join-message" role="status" aria-live="polite"></p>
             <button class="primary-button join-button" id="join-session-button" type="submit">Join test <span aria-hidden="true">→</span></button>
           </form>
         </section>
-        <footer class="page-footer">Your answers are only visible to your teacher.</footer>
+        <footer class="page-footer">Your answers are only visible to your teacher. Answers are teacher-marked; timers are advisory.</footer>
       </section>
 
       <section class="workspace-screen teacher-workspace" id="teacher-side" hidden aria-labelledby="teacher-title">
@@ -57,8 +57,8 @@
               <label for="test-title-input">Test title</label>
               <input id="test-title-input" maxlength="100" placeholder="e.g. Biology: cells" required />
               <div class="form-two-column">
-                <div><label for="test-feedback-mode">Feedback</label><select id="test-feedback-mode"><option value="immediate">After each answer</option><option value="end">At the end</option></select></div>
-                <div class="cloud-toggle-stack"><label><input id="test-speed-bonus" type="checkbox" checked /> Speed bonus</label><label><input id="test-no-time-limit" type="checkbox" /> No time limit</label></div>
+                <div><label for="test-feedback-mode">Marking</label><select id="test-feedback-mode"><option value="end">Teacher review</option></select></div>
+                <div class="cloud-toggle-stack"><label><input id="test-speed-bonus" type="checkbox" disabled /> Speed bonus unavailable on Spark</label><label><input id="test-no-time-limit" type="checkbox" /> No time limit</label></div>
               </div>
               <div class="inline-form-row"><button class="primary-button" type="submit">Save test</button><button class="secondary-button" id="cancel-test-edit" type="button">Cancel</button></div>
             </form>
@@ -103,7 +103,7 @@
 
           <section class="review-panel session-results-panel" id="session-results-panel" hidden aria-labelledby="session-results-title">
             <div class="section-heading"><div><p class="section-kicker">SESSION RESULTS</p><h2 id="session-results-title">Students</h2></div><button class="small-button" id="export-csv-button" type="button">Export CSV</button></div>
-            <div class="attempt-table-wrap"><table class="attempt-table"><thead><tr><th>Student</th><th>Score</th><th>Status</th><th>Submitted</th><th>Written answers</th></tr></thead><tbody id="session-attempts-body"></tbody></table></div>
+            <div class="attempt-table-wrap"><table class="attempt-table"><thead><tr><th>Student</th><th>Score</th><th>Status</th><th>Submitted</th><th>Answers and teacher marks</th></tr></thead><tbody id="session-attempts-body"></tbody></table></div>
             <p class="empty-state" id="no-attempts-message">No students have joined this session yet.</p>
           </section>
         </div>

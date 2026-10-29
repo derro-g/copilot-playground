@@ -5,9 +5,24 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isAnonymousStudent() {
+      return signedIn()
+        && request.auth.token.firebase.sign_in_provider == 'anonymous';
+    }
+
     function isTeacher() {
       return signedIn()
         && exists(/databases/$(database)/documents/teacherUsers/$(request.auth.uid));
+    }
+
+    function ownsTest(testId) {
+      return isTeacher()
+        && get(/databases/$(database)/documents/tests/$(testId)).data.ownerUid == request.auth.uid;
+    }
+
+    function ownsTestAfter(testId) {
+      return isTeacher()
+        && getAfter(/databases/$(database)/documents/tests/$(testId)).data.ownerUid == request.auth.uid;
     }
 
     function ownsSession(sessionId) {
@@ -15,21 +30,30 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/sessions/$(sessionId)).data.ownerUid == request.auth.uid;
     }
 
+    function ownsSessionAfter(sessionId) {
+      return isTeacher()
+        && getAfter(/databases/$(database)/documents/sessions/$(sessionId)).data.ownerUid == request.auth.uid;
+    }
+
     function sessionIsOpen(sessionId) {
       return get(/databases/$(database)/documents/sessions/$(sessionId)).data.status == 'open';
+    }
+
+    function validCode(code) {
+      return code.matches('^[A-HJ-NP-Z2-9]{12}$');
+    }
+
+    function validStudentAnswer(answer) {
+      return answer == null
+        || (answer is string && answer.size() <= 3000)
+        || answer is int
+        || answer is float
+        || (answer is list && answer.size() <= 20);
     }
 
     match /teacherUsers/{uid} {
       allow get: if signedIn() && request.auth.uid == uid;
       allow list, create, update, delete: if false;
-    }
-
-    match /sessionCodes/{code} {
-      allow read, write: if false;
-    }
-
-    match /joinRateLimits/{rateId} {
-      allow read, write: if false;
     }
 
     match /tests/{testId} {
@@ -39,8 +63,8 @@ service cloud.firestore {
         && request.resource.data.title is string
         && request.resource.data.title.size() > 0
         && request.resource.data.title.size() <= 100
-        && request.resource.data.feedbackMode in ['immediate', 'end']
-        && request.resource.data.speedBonus is bool
+        && request.resource.data.feedbackMode == 'end'
+        && request.resource.data.speedBonus == false
         && request.resource.data.noTimeLimit is bool;
       allow update: if isTeacher()
         && resource.data.ownerUid == request.auth.uid
@@ -48,57 +72,156 @@ service cloud.firestore {
         && request.resource.data.title is string
         && request.resource.data.title.size() > 0
         && request.resource.data.title.size() <= 100
-        && request.resource.data.feedbackMode in ['immediate', 'end'];
-      allow delete: if isTeacher() && resource.data.ownerUid == request.auth.uid;
+        && request.resource.data.feedbackMode == 'end'
+        && request.resource.data.speedBonus == false
+        && request.resource.data.noTimeLimit is bool;
+      allow delete: if ownsTest(testId);
 
       match /questions/{questionId} {
-        allow read, create, update, delete: if isTeacher()
-          && get(/databases/$(database)/documents/tests/$(testId)).data.ownerUid == request.auth.uid;
+        allow read, update, delete: if ownsTest(testId);
+        allow create: if ownsTestAfter(testId);
       }
     }
 
-    match /sessions/{sessionId} {
-      allow get, list: if isTeacher() && resource.data.ownerUid == request.auth.uid;
+    match /sessionCodes/{code} {
+      allow get: if validCode(code)
+        && (
+          (isTeacher()
+            && (!exists(/databases/$(database)/documents/sessionCodes/$(code))
+              || ownsSession(get(/databases/$(database)/documents/sessionCodes/$(code)).data.sessionId)))
+          || (isAnonymousStudent()
+            && exists(/databases/$(database)/documents/sessionCodes/$(code))
+            && get(/databases/$(database)/documents/sessions/$(resource.data.sessionId)).data.status == 'open')
+        );
+      allow list: if false;
       allow create: if isTeacher()
+        && validCode(code)
+        && request.resource.data.keys().hasOnly(['sessionId', 'createdAt'])
+        && request.resource.data.keys().hasAll(['sessionId', 'createdAt'])
+        && request.resource.data.sessionId is string
+        && request.resource.data.createdAt == request.time
+        && getAfter(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.ownerUid == request.auth.uid
+        && getAfter(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.joinCode == code
+        && getAfter(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId)).data.status == 'creating';
+      allow update, delete: if ownsSession(resource.data.sessionId);
+    }
+
+    match /sessions/{sessionId} {
+      allow get: if (isTeacher() && resource.data.ownerUid == request.auth.uid)
+        || (isAnonymousStudent() && resource.data.status == 'open');
+      allow list: if isTeacher() && resource.data.ownerUid == request.auth.uid;
+      allow create: if isTeacher()
+        && request.resource.data.keys().hasOnly([
+          'title', 'ownerUid', 'testId', 'joinCode', 'feedbackMode', 'speedBonus',
+          'noTimeLimit', 'maxMarks', 'questionCount', 'status', 'createdAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'title', 'ownerUid', 'testId', 'joinCode', 'feedbackMode', 'speedBonus',
+          'noTimeLimit', 'maxMarks', 'questionCount', 'status', 'createdAt'
+        ])
         && request.resource.data.ownerUid == request.auth.uid
-        && request.resource.data.status in ['open', 'closed'];
-      allow update: if isTeacher()
-        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.testId is string
+        && get(/databases/$(database)/documents/tests/$(request.resource.data.testId)).data.ownerUid == request.auth.uid
+        && request.resource.data.title is string
+        && request.resource.data.feedbackMode == 'end'
+        && request.resource.data.speedBonus == false
+        && request.resource.data.noTimeLimit is bool
+        && request.resource.data.status == 'creating'
+        && request.resource.data.joinCode is string
+        && validCode(request.resource.data.joinCode)
+        && request.resource.data.questionCount is int
+        && request.resource.data.questionCount > 0
+        && request.resource.data.questionCount <= 200
+        && request.resource.data.maxMarks is int
+        && request.resource.data.maxMarks > 0
+        && request.resource.data.createdAt == request.time;
+      allow update: if ownsSession(sessionId)
         && request.resource.data.ownerUid == resource.data.ownerUid
-        && request.resource.data.status in ['open', 'closed']
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
-      allow delete: if isTeacher() && resource.data.ownerUid == request.auth.uid;
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        && request.resource.data.status in ['open', 'closed'];
+      allow delete: if ownsSession(sessionId);
 
       match /publicQuestions/{questionId} {
-        allow get, list: if ownsSession(sessionId);
-        allow write: if false;
+        function validPublicQuestion() {
+          return request.resource.data.keys().hasOnly([
+            'id', 'order', 'prompt', 'type', 'marks', 'timeLimit', 'choices'
+          ])
+            && request.resource.data.keys().hasAll([
+              'id', 'order', 'prompt', 'type', 'marks', 'timeLimit', 'choices'
+            ])
+            && request.resource.data.id == questionId
+            && request.resource.data.order is int
+            && request.resource.data.prompt is string
+            && request.resource.data.prompt.size() > 0
+            && request.resource.data.prompt.size() <= 1000
+            && request.resource.data.type in ['choice', 'multi', 'truefalse', 'short', 'number', 'written']
+            && request.resource.data.marks is int
+            && request.resource.data.marks > 0
+            && (request.resource.data.timeLimit == null || request.resource.data.timeLimit is int)
+            && request.resource.data.choices is list;
+        }
+
+        allow get, list: if (isAnonymousStudent() && sessionIsOpen(sessionId))
+          || ownsSession(sessionId);
+        allow create: if ownsSessionAfter(sessionId) && validPublicQuestion();
+        allow update, delete: if false;
       }
 
       match /answerKeys/{questionId} {
-        allow read, write: if false;
+        allow read: if ownsSession(sessionId);
+        allow create: if ownsSessionAfter(sessionId);
+        allow update, delete: if false;
       }
 
       match /attempts/{attemptId} {
-        allow create: if signedIn()
-          && request.auth.token.firebase.sign_in_provider == 'anonymous'
+        allow create: if isAnonymousStudent()
           && attemptId == request.auth.uid
           && sessionIsOpen(sessionId)
-          && request.resource.data.keys().hasOnly(['ownerUid', 'studentName', 'status', 'score', 'maxMarks', 'createdAt'])
+          && request.resource.data.keys().hasOnly(['ownerUid', 'studentName', 'status', 'createdAt'])
           && request.resource.data.ownerUid == request.auth.uid
           && request.resource.data.studentName is string
           && request.resource.data.studentName.size() > 0
           && request.resource.data.studentName.size() <= 60
           && request.resource.data.status == 'inProgress'
-          && request.resource.data.score == 0
-          && request.resource.data.maxMarks == get(/databases/$(database)/documents/sessions/$(sessionId)).data.maxMarks
           && request.resource.data.createdAt == request.time;
-        allow get: if isTeacher() && ownsSession(sessionId);
+        allow get: if (isTeacher() && ownsSession(sessionId))
+          || (isAnonymousStudent() && attemptId == request.auth.uid && resource.data.ownerUid == request.auth.uid);
         allow list: if isTeacher() && ownsSession(sessionId);
-        allow update, delete: if isTeacher() && ownsSession(sessionId);
+        allow update: if isAnonymousStudent()
+          && attemptId == request.auth.uid
+          && resource.data.ownerUid == request.auth.uid
+          && resource.data.status == 'inProgress'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'submittedAt'])
+          && request.resource.data.status == 'submitted'
+          && request.resource.data.submittedAt == request.time;
+        allow delete: if isTeacher() && ownsSession(sessionId);
 
         match /responses/{questionId} {
+          function questionRef() {
+            return /databases/$(database)/documents/sessions/$(sessionId)/publicQuestions/$(questionId);
+          }
+
           allow get, list: if isTeacher() && ownsSession(sessionId);
-          allow write: if false;
+          allow create: if isAnonymousStudent()
+            && attemptId == request.auth.uid
+            && get(/databases/$(database)/documents/sessions/$(sessionId)/attempts/$(attemptId)).data.ownerUid == request.auth.uid
+            && get(/databases/$(database)/documents/sessions/$(sessionId)/attempts/$(attemptId)).data.status == 'inProgress'
+            && exists(questionRef())
+            && request.resource.data.keys().hasOnly(['questionId', 'prompt', 'type', 'answer', 'maxMarks', 'submittedAt'])
+            && request.resource.data.keys().hasAll(['questionId', 'prompt', 'type', 'answer', 'maxMarks', 'submittedAt'])
+            && request.resource.data.questionId == questionId
+            && request.resource.data.prompt == get(questionRef()).data.prompt
+            && request.resource.data.type == get(questionRef()).data.type
+            && request.resource.data.maxMarks == get(questionRef()).data.marks
+            && validStudentAnswer(request.resource.data.answer)
+            && request.resource.data.submittedAt == request.time;
+          allow update: if ownsSession(sessionId)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['score', 'gradedAt'])
+            && request.resource.data.score is int
+            && request.resource.data.score >= 0
+            && request.resource.data.score <= resource.data.maxMarks
+            && request.resource.data.gradedAt == request.time;
+          allow delete: if ownsSession(sessionId);
         }
       }
     }

@@ -14,20 +14,26 @@ import {
   getDoc,
   getDocs,
   getFirestore,
+  onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
   where,
   writeBatch,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
 import { firebaseConfig } from "./firebase-config.js";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-const CODE_PATTERN = /^[A-HJ-NP-Z2-9]{6}$/;
+const CODE_PATTERN = /^[A-HJ-NP-Z2-9]{12}$/;
+const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+function makeJoinCode() {
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  return [...bytes].map((byte) => CODE_ALPHABET[byte % CODE_ALPHABET.length]).join("");
+}
 const TYPE_LABELS = {
   choice: "Multiple choice",
   multi: "Select all that apply",
@@ -54,11 +60,9 @@ function startQuickfire() {
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const db = getFirestore(app);
-  const functions = getFunctions(app, "us-central1");
   const studentApp = initializeApp(firebaseConfig, "quickfire-student");
   const studentAuth = getAuth(studentApp);
   const studentDb = getFirestore(studentApp);
-  const studentFunctions = getFunctions(studentApp, "us-central1");
   const currentUrl = new URL(window.location.href);
   const codeParam = currentUrl.searchParams.get("code");
   if (codeParam) $("#student-code").value = codeParam.toUpperCase();
@@ -72,13 +76,13 @@ function startQuickfire() {
   let activeQuiz = null;
   let activeQuestionIndex = 0;
   let activeAttemptId = null;
-  let activeStudentName = "";
-  let activeStartedAt = 0;
   let timerId = null;
   let answerSubmitted = false;
   let choiceSelection = new Set();
   let currentAnswers = [];
   let testDraftId = null;
+  let sessionListUnsubscribe = null;
+  let resultsUnsubscribe = null;
 
   const teacherLoginDialog = $("#teacher-login-dialog");
   const studentQuizDialog = $("#student-quiz-dialog");
@@ -103,6 +107,14 @@ function startQuickfire() {
 
   function setTeacherMode(user) {
     teacherUid = user?.uid || null;
+    if (!teacherUid && sessionListUnsubscribe) {
+      sessionListUnsubscribe();
+      sessionListUnsubscribe = null;
+    }
+    if (!teacherUid && resultsUnsubscribe) {
+      resultsUnsubscribe();
+      resultsUnsubscribe = null;
+    }
     $("#teacher-side").hidden = !teacherUid;
     $("#student-side").hidden = Boolean(teacherUid);
     $("#teacher-session-label").hidden = !teacherUid;
@@ -111,7 +123,7 @@ function startQuickfire() {
     $("#teacher-logout").hidden = !teacherUid;
     if (teacherUid) {
       loadTests().catch((error) => setMessage($("#teacher-message"), explainError(error), true));
-      loadSessions().catch((error) => setMessage($("#teacher-message"), explainError(error), true));
+      loadSessions();
     }
   }
 
@@ -274,7 +286,7 @@ function startQuickfire() {
     const sessionSelect = $("#session-test-select");
     const selectedValue = sessionSelect.value;
     sessionSelect.replaceChildren();
-    tests.forEach((test, index) => {
+    tests.forEach((test) => {
       const row = document.createElement("article");
       row.className = `cloud-test-row${selectedTest?.id === test.id ? " is-selected" : ""}`;
       const info = document.createElement("div");
@@ -284,7 +296,7 @@ function startQuickfire() {
       title.textContent = test.title;
       title.addEventListener("click", () => selectTest(test.id));
       const details = document.createElement("span");
-      details.textContent = `${test.questionCount || 0} questions · ${test.feedbackMode === "end" ? "feedback at end" : "immediate feedback"}`;
+      details.textContent = `${test.questionCount || 0} questions · teacher reviewed`;
       info.append(title, details);
       const actions = document.createElement("div");
       actions.className = "cloud-row-actions";
@@ -317,8 +329,8 @@ function startQuickfire() {
     selectedQuestions = questionSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
     $("#test-settings-form").hidden = false;
     $("#test-title-input").value = test.title;
-    $("#test-feedback-mode").value = test.feedbackMode || "immediate";
-    $("#test-speed-bonus").checked = test.speedBonus !== false;
+    $("#test-feedback-mode").value = "end";
+    $("#test-speed-bonus").checked = false;
     $("#test-no-time-limit").checked = test.noTimeLimit === true;
     clearQuestionEditor();
     renderQuestions();
@@ -331,8 +343,8 @@ function startQuickfire() {
     testDraftId = newId(collection(db, "tests"));
     $("#test-settings-form").hidden = false;
     $("#test-title-input").value = "";
-    $("#test-feedback-mode").value = "immediate";
-    $("#test-speed-bonus").checked = true;
+    $("#test-feedback-mode").value = "end";
+    $("#test-speed-bonus").checked = false;
     $("#test-no-time-limit").checked = false;
     clearQuestionEditor();
     $("#cloud-question-form").hidden = false;
@@ -343,11 +355,46 @@ function startQuickfire() {
   $("#create-sample-test").addEventListener("click", async () => {
     if (!teacherUid) return;
     try {
-      const result = await httpsCallable(functions, "createSampleTest")({});
-      const testId = result.data.testId;
+      const testId = `sample-${teacherUid}`;
+      const testRef = doc(db, "tests", testId);
+      if (!(await getDoc(testRef)).exists()) {
+        const samples = [
+          "Describe one way exercise benefits the body.",
+          "Explain why plants need sunlight.",
+          "Describe how a character changes in a story you have read.",
+          "Explain one cause and one effect of a historical event.",
+          "Show your working for a problem that uses fractions.",
+          "Write a short explanation of a science concept you have studied.",
+        ];
+        const batch = writeBatch(db);
+        batch.set(testRef, {
+          ownerUid: teacherUid,
+          title: "Question type sampler",
+          feedbackMode: "end",
+          speedBonus: false,
+          noTimeLimit: true,
+          questionCount: samples.length,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        samples.forEach((prompt, order) => {
+          batch.set(doc(db, "tests", testId, "questions", `sample-${order + 1}`), {
+            prompt,
+            type: "written",
+            marks: 5,
+            timeLimit: 120,
+            choices: [],
+            teacherGuidance: "",
+            explanation: "",
+            optionFeedback: [],
+            order,
+          });
+        });
+        await batch.commit();
+      }
       await loadTests();
       await selectTest(testId);
-      setMessage($("#teacher-message"), result.data.created ? "Sample test created with all six question types." : "Your sample test is ready.");
+      setMessage($("#teacher-message"), "Sample test is ready. This Spark version uses teacher-reviewed answers.");
     } catch (error) {
       setMessage($("#teacher-message"), explainError(error), true);
     }
@@ -370,8 +417,8 @@ function startQuickfire() {
     const settings = {
       ownerUid: teacherUid,
       title,
-      feedbackMode: $("#test-feedback-mode").value,
-      speedBonus: $("#test-speed-bonus").checked,
+      feedbackMode: "end",
+      speedBonus: false,
       noTimeLimit: $("#test-no-time-limit").checked,
       questionCount: selectedQuestions.length,
       updatedAt: serverTimestamp(),
@@ -457,7 +504,24 @@ function startQuickfire() {
     try {
       if (!selectedTest && !testDraftId) throw new Error("Save or create a test before adding questions.");
       const question = collectQuestion();
-      const testId = selectedTest?.id || testDraftId;
+      if (testDraftId) {
+        const title = $("#test-title-input").value.trim();
+        if (!title) throw new Error("Enter a test title before adding questions.");
+        const draftSettings = {
+          ownerUid: teacherUid,
+          title,
+          feedbackMode: "end",
+          speedBonus: false,
+          noTimeLimit: $("#test-no-time-limit").checked,
+          questionCount: 0,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
+        await setDoc(doc(db, "tests", testDraftId), draftSettings);
+        selectedTest = { id: testDraftId, ...draftSettings };
+        testDraftId = null;
+      }
+      const testId = selectedTest.id;
       const questionCollection = collection(db, "tests", testId, "questions");
       if (editingQuestionId) {
         const oldQuestion = selectedQuestions.find((item) => item.id === editingQuestionId);
@@ -466,11 +530,7 @@ function startQuickfire() {
         const questionRef = doc(questionCollection);
         await setDoc(questionRef, { ...question, order: selectedQuestions.length, createdAt: serverTimestamp() });
       }
-      if (testDraftId) {
-        selectedQuestions = await readQuestionDocs(testDraftId);
-      } else {
-        selectedQuestions = await readQuestionDocs(testId);
-      }
+      selectedQuestions = await readQuestionDocs(testId);
       clearQuestionEditor();
       renderQuestions();
       setMessage(message, "Question saved.");
@@ -537,9 +597,86 @@ function startQuickfire() {
     const button = event.currentTarget.querySelector('button[type="submit"]');
     button.disabled = true;
     try {
-      const result = await httpsCallable(functions, "createSession")({ testId });
-      setMessage($("#teacher-message"), `Session opened. Join code: ${result.data.joinCode}`);
-      await loadSessions();
+      const test = tests.find((item) => item.id === testId);
+      if (!test || test.ownerUid !== teacherUid) throw new Error("Choose one of your own tests.");
+      const questionSnapshot = await getDocs(query(collection(db, "tests", testId, "questions"), orderBy("order")));
+      if (questionSnapshot.empty) throw new Error("Add at least one question before opening a session.");
+      if (questionSnapshot.size > 200) throw new Error("A session can contain at most 200 questions.");
+
+      const sessionRef = doc(collection(db, "sessions"));
+      const sessionQuestions = questionSnapshot.docs.map((item, order) => {
+        const question = item.data();
+        const marks = Number(question.marks) || 2;
+        if (!Number.isSafeInteger(marks) || marks < 1 || marks > 100) {
+          throw new Error(`Question ${order + 1} has an invalid mark value. Edit it and try again.`);
+        }
+        return {
+          id: item.id,
+          order,
+          prompt: question.prompt,
+          type: question.type,
+          marks,
+          timeLimit: test.noTimeLimit ? null : Number(question.timeLimit) || 30,
+          choices: question.type === "truefalse" ? ["True", "False"] : Array.isArray(question.choices) ? question.choices : [],
+          answerKey: question,
+        };
+      });
+      const maxMarks = sessionQuestions.reduce((sum, question) => sum + question.marks, 0);
+      const sessionSettings = {
+        title: test.title,
+        ownerUid: teacherUid,
+        testId,
+        feedbackMode: "end",
+        speedBonus: false,
+        noTimeLimit: test.noTimeLimit === true,
+        maxMarks,
+        questionCount: sessionQuestions.length,
+        status: "creating",
+        createdAt: serverTimestamp(),
+      };
+      let joinCode = "";
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const candidate = makeJoinCode();
+        const codeRef = doc(db, "sessionCodes", candidate);
+        try {
+          await runTransaction(db, async (transaction) => {
+            const existing = await transaction.get(codeRef);
+            if (existing.exists()) throw new Error("join-code-collision");
+            transaction.set(sessionRef, { ...sessionSettings, joinCode: candidate });
+            transaction.set(codeRef, { sessionId: sessionRef.id, createdAt: serverTimestamp() });
+          });
+          joinCode = candidate;
+          break;
+        } catch (error) {
+          if (error.message !== "join-code-collision") throw error;
+        }
+      }
+      if (!joinCode) throw new Error("Could not reserve a unique join code. Please try again.");
+      const batch = writeBatch(db);
+      sessionQuestions.forEach(({ answerKey, ...publicQuestion }) => {
+        batch.set(doc(db, "sessions", sessionRef.id, "publicQuestions", publicQuestion.id), publicQuestion);
+        batch.set(doc(db, "sessions", sessionRef.id, "answerKeys", publicQuestion.id), {
+          ...answerKey,
+          ...publicQuestion,
+          id: publicQuestion.id,
+          explanation: cleanClientText(answerKey.explanation, 2000),
+          teacherGuidance: cleanClientText(answerKey.teacherGuidance, 2000),
+          optionFeedback: Array.isArray(answerKey.optionFeedback) ? answerKey.optionFeedback : [],
+        });
+      });
+      batch.update(sessionRef, { status: "open" });
+      try {
+        await batch.commit();
+      } catch (error) {
+        try {
+          await deleteDoc(doc(db, "sessionCodes", joinCode));
+          await deleteDoc(sessionRef);
+        } catch (cleanupError) {
+          throw new Error(`${explainError(error)} The incomplete session could not be cleaned up: ${explainError(cleanupError)}`);
+        }
+        throw error;
+      }
+      setMessage($("#teacher-message"), `Session opened. Join code: ${joinCode}`);
     } catch (error) {
       setMessage($("#teacher-message"), explainError(error), true);
     } finally {
@@ -547,11 +684,13 @@ function startQuickfire() {
     }
   });
 
-  async function loadSessions() {
+  function loadSessions() {
     if (!teacherUid) return;
     const sessionQuery = query(collection(db, "sessions"), where("ownerUid", "==", teacherUid), orderBy("createdAt", "desc"));
-    const snapshot = await getDocs(sessionQuery);
-    renderSessions(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
+    if (sessionListUnsubscribe) sessionListUnsubscribe();
+    sessionListUnsubscribe = onSnapshot(sessionQuery, (snapshot) => {
+      renderSessions(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
+    }, (error) => setMessage($("#teacher-message"), explainError(error), true));
   }
 
   function renderSessions(sessions) {
@@ -595,7 +734,7 @@ function startQuickfire() {
       toggle.addEventListener("click", async () => {
         try {
           await updateDoc(doc(db, "sessions", session.id), { status: session.status === "open" ? "closed" : "open" });
-          await loadSessions();
+          loadSessions();
         } catch (error) {
           setMessage($("#teacher-message"), explainError(error), true);
         }
@@ -611,155 +750,32 @@ function startQuickfire() {
   }
 
   let currentResultRows = [];
-  async function loadSessionResults(session) {
-    selectedSession = session;
-    $("#session-results-panel").hidden = false;
-    $("#session-results-title").textContent = `Students · ${session.title} (${session.joinCode})`;
-    const body = $("#session-attempts-body");
-    body.replaceChildren();
-    const attemptSnapshot = await getDocs(query(collection(db, "sessions", session.id, "attempts"), orderBy("createdAt")));
-    currentResultRows = [];
-    for (const attemptDoc of attemptSnapshot.docs) {
-      const attempt = { id: attemptDoc.id, ...attemptDoc.data() };
-      const responses = await getDocs(collection(db, "sessions", session.id, "attempts", attempt.id, "responses"));
-      const responseItems = responses.docs.map((item) => ({ id: item.id, ...item.data() }));
-      currentResultRows.push({ attempt, responses: responseItems });
-      const row = document.createElement("tr");
-      const name = document.createElement("td");
-      name.textContent = attempt.studentName;
-      const score = document.createElement("td");
-      score.textContent = `${attempt.score || 0} / ${attempt.maxMarks}`;
-      const status = document.createElement("td");
-      const pending = responseItems.filter((response) => response.pending).length;
-      status.textContent = attempt.status === "submitted" ? pending ? `${pending} to mark` : "Submitted" : "In progress";
-      const submitted = document.createElement("td");
-      submitted.textContent = attempt.submittedAt?.toDate ? attempt.submittedAt.toDate().toLocaleString() : "—";
-      const written = document.createElement("td");
-      written.className = "written-review-cell";
-      responseItems.filter((response) => response.type === "written").forEach((response) => {
-        const item = document.createElement("div");
-        const answer = document.createElement("p");
-        answer.textContent = response.answer || "No response";
-        item.append(answer);
-        if (response.pending) {
-          const select = document.createElement("select");
-          select.setAttribute("aria-label", `Marks for written answer out of ${response.maxMarks}`);
-          for (let mark = 0; mark <= response.maxMarks; mark += 1) {
-            const option = document.createElement("option");
-            option.value = String(mark);
-            option.textContent = `${mark}/${response.maxMarks}`;
-            select.append(option);
-          }
-          const save = document.createElement("button");
-          save.type = "button";
-          save.className = "grade-written";
-          save.textContent = "Save mark";
-          save.addEventListener("click", async () => {
-            try {
-              await httpsCallable(functions, "gradeWrittenResponse")({ sessionId: session.id, attemptId: attempt.id, questionId: response.questionId, mark: Number(select.value) });
-              await loadSessionResults(session);
-            } catch (error) {
-              setMessage($("#teacher-message"), explainError(error), true);
-            }
-          });
-          item.append(select, save);
-        } else {
-          const mark = document.createElement("span");
-          mark.textContent = `${response.score}/${response.maxMarks} marks`;
-          item.append(mark);
-        }
-        written.append(item);
-      });
-      row.append(name, score, status, submitted, written);
-      body.append(row);
+  async function saveManualMark(session, attempt, response, mark) {
+    if (!Number.isInteger(mark) || mark < 0 || mark > response.maxMarks) {
+      throw new Error("Choose a valid mark for this answer.");
     }
-    $("#no-attempts-message").hidden = currentResultRows.length > 0;
-  }
-
-  $("#export-csv-button").addEventListener("click", () => {
-    if (!selectedSession) return;
-    const fields = ["session_code", "student_name", "score", "max_marks", "status", "submitted_at", "written_answers"];
-    const quote = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
-    const lines = [fields.map(quote).join(",")];
-    currentResultRows.forEach(({ attempt, responses }) => {
-      const written = responses.filter((response) => response.type === "written")
-        .map((response) => `${response.prompt}: ${response.answer || "No response"} (${response.score || 0}/${response.maxMarks})`).join(" | ");
-      lines.push([
-        selectedSession.joinCode,
-        attempt.studentName,
-        attempt.score || 0,
-        attempt.maxMarks,
-        attempt.status,
-        attempt.submittedAt?.toDate ? attempt.submittedAt.toDate().toISOString() : "",
-        written,
-      ].map(quote).join(","));
+    await updateDoc(doc(db, "sessions", session.id, "attempts", attempt.id, "responses", response.id), {
+      score: mark,
+      gradedAt: serverTimestamp(),
     });
-    const blob = new Blob([lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `quickfire-${selectedSession.joinCode}-results.csv`;
-    link.click();
-    URL.revokeObjectURL(link.href);
-  });
-
-  function parseLegacyTests() {
-    try {
-      const quizzes = JSON.parse(localStorage.getItem("quickfire-quizzes-v2") || "[]");
-      return Array.isArray(quizzes) ? quizzes.filter((quiz) => quiz && Array.isArray(quiz.questions)) : [];
-    } catch {
-      return [];
-    }
+    loadSessionResults(session);
   }
 
-  $("#import-local-tests").addEventListener("click", async () => {
-    if (!teacherUid) return;
-    const legacy = parseLegacyTests();
-    const importedIds = new Set(tests.map((test) => test.legacyId).filter(Boolean));
-    let importedCount = 0;
-    try {
-      for (const oldQuiz of legacy) {
-        if (importedIds.has(oldQuiz.id)) continue;
-        const testRef = await addDoc(collection(db, "tests"), {
-          ownerUid: teacherUid,
-          title: cleanClientText(oldQuiz.title, 100) || "Imported test",
-          legacyId: oldQuiz.id,
-          feedbackMode: oldQuiz.feedbackMode === "end" ? "end" : "immediate",
-          speedBonus: oldQuiz.speedBonus !== false,
-          noTimeLimit: oldQuiz.noTimeLimit === true,
-          questionCount: oldQuiz.questions.length,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-        const batch = writeBatch(db);
-        oldQuiz.questions.forEach((question, order) => {
-          const id = String(question.id || `legacy-${order}`);
-          const legacyIndices = Array.isArray(question.correctIndices) ? question.correctIndices : Number.isInteger(question.correctIndex) ? [question.correctIndex] : [];
-          const oldType = ["choice", "multi", "truefalse", "short", "number", "written"].includes(question.type) ? question.type : "choice";
-          batch.set(doc(db, "tests", testRef.id, "questions", id), {
-            prompt: cleanClientText(question.prompt, 1000),
-            type: oldType,
-            marks: Number(question.marks) || 2,
-            timeLimit: Number(question.timeLimit) || (oldType === "written" ? 120 : 30),
-            choices: oldType === "truefalse" ? ["True", "False"] : Array.isArray(question.choices) ? question.choices : [],
-            correctIndices: legacyIndices,
-            acceptedAnswers: Array.isArray(question.acceptedAnswers) ? question.acceptedAnswers : [],
-            correctNumber: Number.isFinite(Number(question.correctNumber)) ? Number(question.correctNumber) : null,
-            tolerance: Number(question.tolerance) || 0,
-            explanation: cleanClientText(question.explanation, 2000),
-            optionFeedback: Array.isArray(question.optionFeedback) ? question.optionFeedback : [],
-            teacherGuidance: cleanClientText(question.guidance || question.teacherGuidance, 2000),
-            order,
-          });
-        });
-        await batch.commit();
-        importedCount += 1;
-      }
-      await loadTests();
-      setMessage($("#teacher-message"), `${importedCount} local ${importedCount === 1 ? "test" : "tests"} imported. Local data was not deleted.`);
-    } catch (error) {
-      setMessage($("#teacher-message"), explainError(error), true);
+  function describeAnswerKey(question) {
+    if (["choice", "truefalse", "multi"].includes(question.type)) {
+      const correctIndices = Array.isArray(question.correctIndices)
+        ? question.correctIndices
+        : Number.isInteger(question.correctIndex) ? [question.correctIndex] : [];
+      const choices = question.type === "truefalse" ? ["True", "False"] : question.choices || [];
+      return correctIndices.map((index) => choices[index]).filter(Boolean).join(", ");
     }
-  });
+    if (question.type === "short") return (question.acceptedAnswers || []).join(" / ");
+    if (question.type === "number") {
+      const tolerance = Number(question.tolerance) || 0;
+      return tolerance ? `${question.correctNumber} ± ${tolerance}` : String(question.correctNumber ?? "");
+    }
+    return "";
+  }
 
   function cleanClientText(value, max) { return typeof value === "string" ? value.trim().slice(0, max) : ""; }
 
@@ -768,7 +784,7 @@ function startQuickfire() {
     const code = $("#student-code").value.trim().toUpperCase();
     const name = $("#student-display-name").value.trim();
     if (!CODE_PATTERN.test(code)) {
-      setMessage($("#student-join-message"), "Enter a 6-character code. 0, O, 1, and I are not used.", true);
+      setMessage($("#student-join-message"), "Enter a 12-character code. 0, O, 1, and I are not used.", true);
       return;
     }
     if (!name || name.length > 60) {
@@ -781,15 +797,39 @@ function startQuickfire() {
     try {
       if (studentAuth.currentUser) await signOut(studentAuth);
       const credential = await signInAnonymously(studentAuth);
-      const joined = await httpsCallable(studentFunctions, "joinSession")({ code });
-      const session = { id: joined.data.sessionId, ...joined.data };
+      let codeSnapshot;
+      try {
+        codeSnapshot = await getDoc(doc(studentDb, "sessionCodes", code));
+      } catch (error) {
+        if (error?.code?.includes("permission-denied")) throw new Error("That code is not open. Check it with your teacher.");
+        throw error;
+      }
+      if (!codeSnapshot.exists()) throw new Error("That code is not open. Check it with your teacher.");
+      let sessionSnapshot;
+      try {
+        sessionSnapshot = await getDoc(doc(studentDb, "sessions", codeSnapshot.data().sessionId));
+      } catch (error) {
+        if (error?.code?.includes("permission-denied")) throw new Error("That code is not open. Check it with your teacher.");
+        throw error;
+      }
+      if (!sessionSnapshot.exists() || sessionSnapshot.data().status !== "open") {
+        throw new Error("That code is not open. Check it with your teacher.");
+      }
+      const questionsSnapshot = await getDocs(query(
+        collection(studentDb, "sessions", sessionSnapshot.id, "publicQuestions"),
+        orderBy("order"),
+      ));
+      if (questionsSnapshot.empty) throw new Error("This session has no questions yet.");
+      const session = {
+        id: sessionSnapshot.id,
+        ...sessionSnapshot.data(),
+        questions: questionsSnapshot.docs.map((item) => ({ id: item.id, ...item.data() })),
+      };
       const attemptRef = doc(studentDb, "sessions", session.id, "attempts", credential.user.uid);
       await setDoc(attemptRef, {
         ownerUid: credential.user.uid,
         studentName: name,
         status: "inProgress",
-        score: 0,
-        maxMarks: session.maxMarks,
         createdAt: serverTimestamp(),
       });
       activeQuiz = {
@@ -797,15 +837,13 @@ function startQuickfire() {
         questions: session.questions,
       };
       activeAttemptId = credential.user.uid;
-      activeStudentName = name;
       activeQuestionIndex = 0;
       currentAnswers = [];
       $("#active-session-code").textContent = `JOIN CODE · ${session.joinCode}`;
       $("#active-session-title").textContent = `${session.title} · ${name}`;
       $("#student-question-screen").hidden = false;
       $("#student-result-screen").hidden = true;
-      const firstQuestion = await httpsCallable(studentFunctions, "startQuestion")({ sessionId: session.id, questionId: session.questions[0].id });
-      renderStudentQuestion(firstQuestion.data.startedAt);
+      renderStudentQuestion(Date.now());
       studentQuizDialog.showModal();
       setMessage($("#student-join-message"), "");
     } catch (error) {
@@ -817,7 +855,7 @@ function startQuickfire() {
 
   function getCurrentQuestion() { return activeQuiz.questions[activeQuestionIndex]; }
 
-  function renderStudentQuestion(serverStartedAt = Date.now()) {
+  function renderStudentQuestion(startedAt = Date.now()) {
     stopStudentTimer();
     answerSubmitted = false;
     choiceSelection = new Set();
@@ -881,8 +919,7 @@ function startQuickfire() {
       host.append(input);
       $("#student-submit-answer").disabled = true;
     }
-    activeStartedAt = serverStartedAt;
-    if (!activeQuiz.noTimeLimit && question.timeLimit) startStudentTimer(question.timeLimit, serverStartedAt);
+    if (!activeQuiz.noTimeLimit && question.timeLimit) startStudentTimer(question.timeLimit, startedAt);
   }
 
   function formatSeconds(seconds) {
@@ -933,17 +970,20 @@ function startQuickfire() {
     answerSubmitted = true;
     stopStudentTimer();
     $("#student-submit-answer").disabled = true;
-    setMessage($("#student-answer-feedback"), "Checking answer…");
+    setMessage($("#student-answer-feedback"), "Saving your answer…");
     try {
-      const result = await httpsCallable(studentFunctions, "submitAnswer")({
-        sessionId: activeQuiz.id,
+      await setDoc(doc(studentDb, "sessions", activeQuiz.id, "attempts", activeAttemptId, "responses", question.id), {
         questionId: question.id,
+        prompt: question.prompt,
+        type: question.type,
         answer,
+        maxMarks: question.marks,
+        submittedAt: serverTimestamp(),
       });
-      currentAnswers.push({ questionId: question.id, answer, ...result.data });
+      currentAnswers.push({ questionId: question.id, answer });
       const feedback = $("#student-answer-feedback");
-      feedback.textContent = result.data.feedback || "Answer recorded.";
-      feedback.className = `modal-answer-feedback${result.data.pending ? " is-pending" : result.data.correct === true ? " is-correct" : result.data.correct === false ? " is-wrong" : " is-muted"}`;
+      feedback.textContent = "Answer saved. Your teacher will review and mark it.";
+      feedback.className = "modal-answer-feedback is-pending";
       $$(".student-answer-option").forEach((button) => { button.disabled = true; });
       const input = $("#student-answer-input");
       if (input) input.disabled = true;
@@ -966,13 +1006,11 @@ function startQuickfire() {
       button.dataset.advance = "false";
       if (activeQuestionIndex < activeQuiz.questions.length - 1) {
         const nextIndex = activeQuestionIndex + 1;
-        const nextQuestion = activeQuiz.questions[nextIndex];
         button.disabled = true;
         setMessage($("#student-answer-feedback"), "Loading next question…");
         try {
-          const startResult = await httpsCallable(studentFunctions, "startQuestion")({ sessionId: activeQuiz.id, questionId: nextQuestion.id });
           activeQuestionIndex = nextIndex;
-          renderStudentQuestion(startResult.data.startedAt);
+          renderStudentQuestion(Date.now());
         } catch (error) {
           button.disabled = false;
           button.dataset.advance = "true";
@@ -990,12 +1028,15 @@ function startQuickfire() {
     $("#student-submit-answer").disabled = true;
     setMessage($("#student-answer-feedback"), "Saving your result…");
     try {
-      const result = await httpsCallable(studentFunctions, "finishAttempt")({ sessionId: activeQuiz.id });
+      await updateDoc(doc(studentDb, "sessions", activeQuiz.id, "attempts", activeAttemptId), {
+        status: "submitted",
+        submittedAt: serverTimestamp(),
+      });
       stopStudentTimer();
       $("#student-question-screen").hidden = true;
       $("#student-result-screen").hidden = false;
-      $("#student-result-summary").textContent = `${result.data.score} / ${result.data.maxMarks} marks · ${result.data.pending} written ${result.data.pending === 1 ? "answer" : "answers"} waiting for teacher review.`;
-      renderStudentEndFeedback(result.data.feedback || []);
+      $("#student-result-summary").textContent = `${currentAnswers.length} answer${currentAnswers.length === 1 ? "" : "s"} saved. Your teacher will review them; this free Spark version does not automatically score answers.`;
+      renderStudentEndFeedback([]);
     } catch (error) {
       $("#student-submit-answer").disabled = false;
       setMessage($("#student-answer-feedback"), explainError(error), true);
@@ -1042,80 +1083,110 @@ function startQuickfire() {
   });
   studentQuizDialog.addEventListener("close", stopStudentTimer);
 
-  async function loadSessionResults(session) {
+  function loadSessionResults(session) {
     selectedSession = session;
     $("#session-results-panel").hidden = false;
     $("#session-results-title").textContent = `Students · ${session.title} (${session.joinCode})`;
     const body = $("#session-attempts-body");
     body.replaceChildren();
-    const attemptsSnapshot = await getDocs(query(collection(db, "sessions", session.id, "attempts"), orderBy("createdAt")));
-    currentResultRows = [];
-    for (const attemptDoc of attemptsSnapshot.docs) {
-      const attempt = { id: attemptDoc.id, ...attemptDoc.data() };
-      const responsesSnapshot = await getDocs(collection(db, "sessions", session.id, "attempts", attempt.id, "responses"));
-      const responses = responsesSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
-      currentResultRows.push({ attempt, responses });
-      const row = document.createElement("tr");
-      const name = document.createElement("td");
-      name.textContent = attempt.studentName;
-      const score = document.createElement("td");
-      score.textContent = `${attempt.score || 0} / ${attempt.maxMarks}`;
-      const status = document.createElement("td");
-      const pending = responses.filter((response) => response.pending).length;
-      status.textContent = attempt.status === "submitted" ? pending ? `${pending} to mark` : "Submitted" : "In progress";
-      const submitted = document.createElement("td");
-      submitted.textContent = attempt.submittedAt?.toDate ? attempt.submittedAt.toDate().toLocaleString() : "—";
-      const written = document.createElement("td");
-      written.className = "written-review-cell";
-      responses.filter((response) => response.type === "written").forEach((response) => {
-        const item = document.createElement("div");
-        const answer = document.createElement("p");
-        answer.textContent = response.answer || "No response";
-        item.append(answer);
-        if (response.pending) {
-          const select = document.createElement("select");
-          select.setAttribute("aria-label", `Marks for written answer out of ${response.maxMarks}`);
-          for (let mark = 0; mark <= response.maxMarks; mark += 1) {
-            const option = document.createElement("option");
-            option.value = String(mark);
-            option.textContent = `${mark}/${response.maxMarks}`;
-            select.append(option);
-          }
-          const save = document.createElement("button");
-          save.type = "button";
-          save.className = "grade-written";
-          save.textContent = "Save mark";
-          save.addEventListener("click", async () => {
-            try {
-              await httpsCallable(functions, "gradeWrittenResponse")({ sessionId: session.id, attemptId: attempt.id, questionId: response.questionId, mark: Number(select.value) });
-              await loadSessionResults(session);
-            } catch (error) {
-              setMessage($("#teacher-message"), explainError(error), true);
+    if (resultsUnsubscribe) resultsUnsubscribe();
+    const attemptsQuery = query(collection(db, "sessions", session.id, "attempts"), orderBy("createdAt"));
+    resultsUnsubscribe = onSnapshot(attemptsQuery, async (attemptsSnapshot) => {
+      try {
+        body.replaceChildren();
+        currentResultRows = [];
+        for (const attemptDoc of attemptsSnapshot.docs) {
+          const attempt = { id: attemptDoc.id, ...attemptDoc.data() };
+          const responsesSnapshot = await getDocs(collection(db, "sessions", session.id, "attempts", attempt.id, "responses"));
+          const responses = await Promise.all(responsesSnapshot.docs.map(async (item) => {
+            const response = { id: item.id, ...item.data() };
+            const answerKeySnapshot = await getDoc(doc(db, "sessions", session.id, "answerKeys", response.id));
+            const answerKey = answerKeySnapshot.exists() ? answerKeySnapshot.data() : {};
+            return {
+              ...response,
+              expectedAnswer: describeAnswerKey(answerKey),
+              teacherGuidance: answerKey.teacherGuidance || "",
+            };
+          }));
+          currentResultRows.push({ attempt, responses });
+          const row = document.createElement("tr");
+          const name = document.createElement("td");
+          name.textContent = attempt.studentName;
+          const score = document.createElement("td");
+          const earned = responses.reduce((sum, response) => sum + (Number(response.score) || 0), 0);
+          score.textContent = `${earned} / ${session.maxMarks}`;
+          const status = document.createElement("td");
+          const pending = responses.filter((response) => typeof response.score !== "number").length;
+          status.textContent = attempt.status === "submitted" ? pending ? `${pending} to mark` : "Reviewed" : "In progress";
+          const submitted = document.createElement("td");
+          submitted.textContent = attempt.submittedAt?.toDate ? attempt.submittedAt.toDate().toLocaleString() : "—";
+          const answers = document.createElement("td");
+          answers.className = "written-review-cell";
+          responses.forEach((response) => {
+            const item = document.createElement("div");
+            const prompt = document.createElement("strong");
+            prompt.textContent = response.prompt;
+            const answer = document.createElement("p");
+            answer.textContent = response.answer || "No response";
+            item.append(prompt, answer);
+            if (response.expectedAnswer) {
+              const expected = document.createElement("p");
+              expected.textContent = `Expected answer: ${response.expectedAnswer}`;
+              item.append(expected);
             }
+            if (response.teacherGuidance) {
+              const guidance = document.createElement("p");
+              guidance.textContent = `Marking guidance: ${response.teacherGuidance}`;
+              item.append(guidance);
+            }
+            if (typeof response.score !== "number") {
+              const select = document.createElement("select");
+              select.setAttribute("aria-label", `Marks for answer out of ${response.maxMarks}`);
+              for (let mark = 0; mark <= response.maxMarks; mark += 1) {
+                const option = document.createElement("option");
+                option.value = String(mark);
+                option.textContent = `${mark}/${response.maxMarks}`;
+                select.append(option);
+              }
+              const save = document.createElement("button");
+              save.type = "button";
+              save.className = "grade-written";
+              save.textContent = "Save mark";
+              save.addEventListener("click", async () => {
+                try {
+                  await saveManualMark(session, attempt, response, Number(select.value));
+                } catch (error) {
+                  setMessage($("#teacher-message"), explainError(error), true);
+                }
+              });
+              item.append(select, save);
+            } else {
+              const grade = document.createElement("span");
+              grade.textContent = `${response.score}/${response.maxMarks} marks`;
+              item.append(grade);
+            }
+            answers.append(item);
           });
-          item.append(select, save);
-        } else {
-          const grade = document.createElement("span");
-          grade.textContent = `${response.score}/${response.maxMarks} marks`;
-          item.append(grade);
+          row.append(name, score, status, submitted, answers);
+          body.append(row);
         }
-        written.append(item);
-      });
-      row.append(name, score, status, submitted, written);
-      body.append(row);
-    }
-    $("#no-attempts-message").hidden = currentResultRows.length > 0;
+        $("#no-attempts-message").hidden = currentResultRows.length > 0;
+      } catch (error) {
+        setMessage($("#teacher-message"), explainError(error), true);
+      }
+    }, (error) => setMessage($("#teacher-message"), explainError(error), true));
   }
 
   $("#export-csv-button").addEventListener("click", () => {
     if (!selectedSession) return;
     const quote = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
-    const lines = [["join_code", "student_name", "score", "max_marks", "status", "submitted_at", "written_answers"].map(quote).join(",")];
+    const lines = [["join_code", "student_name", "score", "max_marks", "status", "submitted_at", "answers"].map(quote).join(",")];
     currentResultRows.forEach(({ attempt, responses }) => {
-      const written = responses.filter((response) => response.type === "written")
-        .map((response) => `${response.prompt}: ${response.answer || "No response"} (${response.score || 0}/${response.maxMarks})`).join(" | ");
-      lines.push([selectedSession.joinCode, attempt.studentName, attempt.score || 0, attempt.maxMarks, attempt.status,
-        attempt.submittedAt?.toDate ? attempt.submittedAt.toDate().toISOString() : "", written].map(quote).join(","));
+      const answers = responses
+        .map((response) => `${response.prompt}: ${response.answer || "No response"} (${response.score ?? "unmarked"}/${response.maxMarks})`).join(" | ");
+      lines.push([selectedSession.joinCode, attempt.studentName,
+        responses.reduce((sum, response) => sum + (Number(response.score) || 0), 0), selectedSession.maxMarks, attempt.status,
+        attempt.submittedAt?.toDate ? attempt.submittedAt.toDate().toISOString() : "", answers].map(quote).join(","));
     });
     const blob = new Blob([lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -1147,8 +1218,8 @@ function startQuickfire() {
           ownerUid: teacherUid,
           title: cleanClientText(oldTest.title, 100) || "Imported test",
           legacyId: oldTest.id,
-          feedbackMode: oldTest.feedbackMode === "end" ? "end" : "immediate",
-          speedBonus: oldTest.speedBonus !== false,
+          feedbackMode: "end",
+          speedBonus: false,
           noTimeLimit: oldTest.noTimeLimit === true,
           questionCount: oldTest.questions.length,
           createdAt: serverTimestamp(),
@@ -1178,8 +1249,6 @@ function startQuickfire() {
       setMessage($("#teacher-message"), explainError(error), true);
     }
   });
-
-  function cleanClientText(value, maxLength) { return typeof value === "string" ? value.trim().slice(0, maxLength) : ""; }
 
   renderTypeEditor();
 }
