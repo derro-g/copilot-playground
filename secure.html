@@ -41,13 +41,13 @@
             <button class="primary-button join-button" id="join-session-button" type="submit">Join test <span aria-hidden="true">→</span></button>
           </form>
         </section>
-        <footer class="page-footer">Your answers are only visible to your teacher. Answers are teacher-marked; timers are advisory.</footer>
+        <footer class="page-footer">Your result is calculated when you finish. Answer keys are accessible in the browser, so use this for low-stakes practice only.</footer>
       </section>
 
       <section class="workspace-screen teacher-workspace" id="teacher-side" hidden aria-labelledby="teacher-title">
         <div class="teacher-heading">
           <div><p class="eyebrow"><span class="eyebrow-dot"></span> PRIVATE TEACHER WORKSPACE</p><h1 id="teacher-title">Your tests.<br /><em>Your sessions.</em></h1></div>
-          <p class="teacher-intro">Build reusable tests, open a session when you’re ready, and review results as students finish.</p>
+          <p class="teacher-intro">Build reusable tests, open a session when you’re ready, and review automatic results as students finish. This browser-only grading is for low-stakes practice; students can inspect answer keys.</p>
         </div>
 
         <div class="teacher-cloud-layout">
@@ -57,8 +57,8 @@
               <label for="test-title-input">Test title</label>
               <input id="test-title-input" maxlength="100" placeholder="e.g. Biology: cells" required />
               <div class="form-two-column">
-                <div><label for="test-feedback-mode">Marking</label><select id="test-feedback-mode"><option value="end">Teacher review</option></select></div>
-                <div class="cloud-toggle-stack"><label><input id="test-speed-bonus" type="checkbox" disabled /> Speed bonus unavailable on Spark</label><label><input id="test-no-time-limit" type="checkbox" /> No time limit</label></div>
+                <div><label>Marking</label><p>Automatic for option questions</p></div>
+                <div class="cloud-toggle-stack"><label><input id="test-speed-bonus" type="checkbox" disabled /> Speed bonus unavailable</label><label><input id="test-no-time-limit" type="checkbox" /> No time limit</label></div>
               </div>
               <div class="inline-form-row"><button class="primary-button" type="submit">Save test</button><button class="secondary-button" id="cancel-test-edit" type="button">Cancel</button></div>
             </form>
@@ -77,14 +77,11 @@
               <label for="question-prompt">Question</label>
               <textarea id="question-prompt" rows="3" maxlength="1000" required></textarea>
               <div class="form-two-column">
-                <div><label for="question-type">Answer type</label><select id="question-type"><option value="choice">Multiple choice</option><option value="multi">Select all that apply</option><option value="truefalse">True or false</option><option value="short">Short answer</option><option value="number">Number</option><option value="written">Written explanation</option></select></div>
+                <div><label for="question-type">Answer type</label><select id="question-type"><option value="choice">Multiple choice</option><option value="multi">Select all that apply</option><option value="truefalse">True or false</option></select></div>
                 <div><label for="question-marks">Marks</label><select id="question-marks"><option value="2">2 marks</option><option value="5">5 marks</option><option value="10">10 marks</option></select></div>
               </div>
               <label for="question-time">Time limit</label><select id="question-time"><option value="15">15 seconds</option><option value="30">30 seconds</option><option value="60">1 minute</option><option value="90">1 minute 30 seconds</option><option value="120">2 minutes</option></select>
               <div id="question-type-editor"></div>
-              <label for="question-explanation">Explanation <span class="optional-label">optional</span></label><textarea id="question-explanation" rows="2" maxlength="1000"></textarea>
-              <label for="question-option-feedback">Per-option feedback <span class="optional-label">optional, one per line</span></label><textarea id="question-option-feedback" rows="3" maxlength="2000" placeholder="One line for each option"></textarea>
-              <label for="question-guidance">Teacher marking guidance <span class="optional-label">written answers</span></label><textarea id="question-guidance" rows="2" maxlength="1000"></textarea>
               <p class="secure-message" id="question-editor-message" role="status"></p>
               <div class="inline-form-row"><button class="primary-button" id="save-question-button" type="submit">Add question</button><button class="secondary-button" id="cancel-question-edit" type="button" hidden>Cancel edit</button></div>
             </form>
@@ -103,7 +100,7 @@
 
           <section class="review-panel session-results-panel" id="session-results-panel" hidden aria-labelledby="session-results-title">
             <div class="section-heading"><div><p class="section-kicker">SESSION RESULTS</p><h2 id="session-results-title">Students</h2></div><button class="small-button" id="export-csv-button" type="button">Export CSV</button></div>
-            <div class="attempt-table-wrap"><table class="attempt-table"><thead><tr><th>Student</th><th>Score</th><th>Status</th><th>Submitted</th><th>Answers and teacher marks</th></tr></thead><tbody id="session-attempts-body"></tbody></table></div>
+            <div class="attempt-table-wrap"><table class="attempt-table"><thead><tr><th>Student</th><th>Score</th><th>Status</th><th>Submitted</th><th>Answers and automatic marks</th></tr></thead><tbody id="session-attempts-body"></tbody></table></div>
             <p class="empty-state" id="no-attempts-message">No students have joined this session yet.</p>
           </section>
         </div>
@@ -114,7 +111,7 @@
       <div class="modal-shell">
         <div class="modal-topbar"><div><p class="section-kicker" id="active-session-code"></p><h2 id="active-session-title"></h2></div><button class="icon-button" id="exit-session" type="button" aria-label="Leave test">×</button></div>
         <section id="student-question-screen"><div class="modal-progress-row"><span id="student-question-count"></span><span class="modal-points" id="student-question-marks"></span></div><div class="modal-progress-track"><span id="student-question-progress"></span></div><div class="modal-timer-row" id="student-timer-row"><span id="student-time-text"></span><strong id="student-timer"></strong></div><div class="modal-question-copy"><p class="question-kicker" id="student-question-type"></p><h1 id="student-question-prompt"></h1></div><div id="student-answer-controls" class="modal-answer-grid"></div><p id="student-answer-feedback" class="modal-answer-feedback" aria-live="polite"></p><div class="student-next-row"><button class="primary-button" id="student-submit-answer" type="button" disabled>Submit answer <span aria-hidden="true">→</span></button></div></section>
-        <section id="student-result-screen" hidden><p class="eyebrow"><span class="eyebrow-dot"></span> TEST COMPLETE</p><h1>Your result,<br /><em>saved.</em></h1><p id="student-result-summary" class="intro-description"></p><div id="student-end-feedback" class="end-feedback-list" hidden></div><button class="primary-button" id="student-done-button" type="button">Done <span aria-hidden="true">→</span></button></section>
+        <section id="student-result-screen" hidden><p class="eyebrow"><span class="eyebrow-dot"></span> TEST COMPLETE</p><h1>Your result,<br /><em>saved.</em></h1><p id="student-result-summary" class="intro-description"></p><p id="student-result-error" class="secure-message" role="status" aria-live="polite"></p><button class="secondary-button" id="student-result-retry" type="button" hidden>Load result</button><div id="student-end-feedback" class="end-feedback-list" hidden></div><button class="primary-button" id="student-done-button" type="button">Done <span aria-hidden="true">→</span></button></section>
       </div>
     </dialog>
 

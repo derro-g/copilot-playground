@@ -43,12 +43,16 @@ service cloud.firestore {
       return code.matches('^[A-HJ-NP-Z2-9]{12}$');
     }
 
-    function validStudentAnswer(answer) {
+    function validStudentAnswer(question, answer) {
       return answer == null
-        || (answer is string && answer.size() <= 3000)
-        || answer is int
-        || answer is float
-        || (answer is list && answer.size() <= 20);
+        || ((question.type == 'choice' || question.type == 'truefalse')
+          && answer is int
+          && answer >= 0
+          && answer < question.choices.size())
+        || (question.type == 'multi'
+          && answer is list
+          && answer.size() > 0
+          && answer.size() <= question.choices.size());
     }
 
     match /teacherUsers/{uid} {
@@ -154,7 +158,7 @@ service cloud.firestore {
             && request.resource.data.prompt is string
             && request.resource.data.prompt.size() > 0
             && request.resource.data.prompt.size() <= 1000
-            && request.resource.data.type in ['choice', 'multi', 'truefalse', 'short', 'number', 'written']
+            && request.resource.data.type in ['choice', 'multi', 'truefalse']
             && request.resource.data.marks is int
             && request.resource.data.marks > 0
             && (request.resource.data.timeLimit == null || request.resource.data.timeLimit is int)
@@ -168,7 +172,16 @@ service cloud.firestore {
       }
 
       match /answerKeys/{questionId} {
-        allow read: if ownsSession(sessionId);
+        function ownsSubmittedAttempt() {
+          let attemptPath = /databases/$(database)/documents/sessions/$(sessionId)/attempts/$(request.auth.uid);
+          return isAnonymousStudent()
+            && exists(attemptPath)
+            && get(attemptPath).data.ownerUid == request.auth.uid
+            && get(attemptPath).data.status == 'submitted';
+        }
+
+        allow get: if ownsSession(sessionId) || ownsSubmittedAttempt();
+        allow list: if ownsSession(sessionId);
         allow create: if ownsSessionAfter(sessionId);
         allow update, delete: if false;
       }
@@ -213,14 +226,9 @@ service cloud.firestore {
             && request.resource.data.prompt == get(questionRef()).data.prompt
             && request.resource.data.type == get(questionRef()).data.type
             && request.resource.data.maxMarks == get(questionRef()).data.marks
-            && validStudentAnswer(request.resource.data.answer)
+            && validStudentAnswer(get(questionRef()).data, request.resource.data.answer)
             && request.resource.data.submittedAt == request.time;
-          allow update: if ownsSession(sessionId)
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['score', 'gradedAt'])
-            && request.resource.data.score is int
-            && request.resource.data.score >= 0
-            && request.resource.data.score <= resource.data.maxMarks
-            && request.resource.data.gradedAt == request.time;
+          allow update: if false;
           allow delete: if ownsSession(sessionId);
         }
       }

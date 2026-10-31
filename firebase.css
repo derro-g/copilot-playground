@@ -81,7 +81,7 @@
 .student-answer-input.text-long { min-height: 132px; resize: vertical; }
 .student-answer-input:disabled { background: #edf2f1; }
 .session-result-heading { margin: 20px 0 8px; font-family: "Space Grotesk",sans-serif; font-size: 2.4rem; }
-.written-review-cell { min-width: 180px; white-space: pre-wrap; }
+.answer-review-cell { min-width: 180px; white-space: pre-wrap; }
 @media (max-width: 760px) {
   .teacher-cloud-layout { grid-template-columns: 1fr; }
   .teacher-cloud-layout > .session-panel, .teacher-cloud-layout > .session-results-panel { grid-column: auto; }

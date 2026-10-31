@@ -6,8 +6,8 @@ Quickfire is a static GitHub Pages quiz site backed by Firebase Authentication a
 
 - Teachers sign in with Email/Password and must have an administrator-created `teacherUsers/{uid}` document.
 - Students use Firebase Anonymous Authentication and join with a 12-character code.
-- The browser writes quiz sessions and answers directly to Firestore. Security Rules allow students to read only public question documents and submit their own responses.
-- Correct answers remain in teacher-only `answerKeys` documents. To keep them private without a trusted backend, this Spark version does **not** automatically grade answers; teachers review and mark each response.
+- The browser writes quiz sessions and answers directly to Firestore. Choice, select-all, and true/false questions are automatically graded in the browser when the student finishes; teachers can also see scores and export them as CSV.
+- Student clients can read individual answer-key documents after setting their attempt to submitted. Because the grading code and Firebase access run in the student's browser, a determined student can inspect the keys or bypass the intended timing. This is a convenience for low-stakes practice, not secure assessment. Do not use it for high-stakes or proctored tests.
 - The question timer is only displayed in the student's browser. Without a trusted server, students can bypass it. Do not use this version for high-stakes or proctored tests.
 - 12-character codes reduce guessing risk, but direct client access has no server-side rate limiting.
 
@@ -18,9 +18,9 @@ Quickfire is a static GitHub Pages quiz site backed by Firebase Authentication a
 - `sessionCodes/{code}`: 12-character code-to-session mapping. Students may get a single code document but cannot list codes.
 - `sessions/{sessionId}`: session metadata, owner, status, and maximum marks.
 - `sessions/{sessionId}/publicQuestions/{questionId}`: prompts/options available to signed-in anonymous students while the session is open.
-- `sessions/{sessionId}/answerKeys/{questionId}`: private answer-key snapshots readable only by the session's teacher.
+- `sessions/{sessionId}/answerKeys/{questionId}`: answer-key snapshots readable by the teacher and individually fetchable by that student's client after submission. These are not secret from students.
 - `sessions/{sessionId}/attempts/{anonymousUid}`: student name and submission status.
-- `sessions/{sessionId}/attempts/{anonymousUid}/responses/{questionId}`: submitted answer and teacher-entered mark. Students cannot read response documents.
+- `sessions/{sessionId}/attempts/{anonymousUid}/responses/{questionId}`: submitted answer. Scores are calculated from the answer keys in the teacher's or student's browser; they are not saved as trusted marks.
 
 The rules in `firestore.rules` enforce these access boundaries. Never leave the database in **Test Mode**: Test Mode permits broad access and can expose or allow modification of student data and answer keys.
 
@@ -30,14 +30,14 @@ The rules in `firestore.rules` enforce these access boundaries. Never leave the 
 2. In **Authentication → Sign-in method**, enable **Email/Password** and **Anonymous**.
 3. In **Authentication → Users**, create your teacher account. Copy its UID.
 4. In **Firestore → Data**, create `teacherUsers/{UID}` (replace `{UID}` with the copied UID). Add a Boolean field such as `authorized: true`. Do this before publishing the restrictive rules because the rules intentionally block clients from creating teacher access.
-5. In **Firestore → Rules**, replace the Test Mode rules with the complete contents of `firestore.rules`, then click **Publish**. Do this before using the live site. The app's answer keys and student data are not safe while Test Mode rules remain active.
+5. In **Firestore → Rules**, replace the current rules with the complete contents of `firestore.rules`, then click **Publish**. These rules allow a student to fetch answer keys after their attempt is marked submitted. This does not secure the keys against a determined student; use only for low-stakes practice. Never leave the database in Test Mode.
 6. In **Project settings → Your apps**, register a Web App and confirm its configuration. The config in `firebase-config.js` uses project `quikfire-1`; its `authDomain` should be `quikfire-1.firebaseapp.com`. Web app config values, including the API key, are public identifiers, not server credentials.
 7. In **Authentication → Settings → Authorized domains**, add `derro-g.github.io` (domain only, no path).
-8. Publish the site change from the project folder:
+8. After publishing the updated rules, publish the site change from the project folder:
 
    ```powershell
    git add -A
-   git commit -m "Connect Quickfire to Firebase Spark"
+   git commit -m "Add low-stakes automatic grading"
    git push
    ```
 

@@ -30,6 +30,7 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const CODE_PATTERN = /^[A-HJ-NP-Z2-9]{12}$/;
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const SUPPORTED_QUESTION_TYPES = ["choice", "multi", "truefalse"];
 function makeJoinCode() {
   const bytes = crypto.getRandomValues(new Uint8Array(12));
   return [...bytes].map((byte) => CODE_ALPHABET[byte % CODE_ALPHABET.length]).join("");
@@ -38,10 +39,26 @@ const TYPE_LABELS = {
   choice: "Multiple choice",
   multi: "Select all that apply",
   truefalse: "True or false",
-  short: "Short answer",
-  number: "Number",
-  written: "Written explanation",
 };
+function gradeAnswer(question, answer) {
+  const expected = Array.isArray(question.correctIndices)
+    ? [...new Set(question.correctIndices)].sort((a, b) => a - b)
+    : Number.isInteger(question.correctIndex) ? [question.correctIndex] : [];
+  const selected = question.type === "multi" && Array.isArray(answer)
+    ? [...new Set(answer)].sort((a, b) => a - b)
+    : Number.isInteger(answer) ? [answer] : [];
+  const correct = expected.length > 0
+    && selected.length === expected.length
+    && selected.every((index, position) => index === expected[position]);
+  const choices = question.type === "truefalse" ? ["True", "False"] : question.choices || [];
+  return {
+    correct,
+    score: correct ? Number(question.marks) || 0 : 0,
+    maxMarks: Number(question.marks) || 0,
+    correctAnswer: expected.map((index) => choices[index]).filter(Boolean).join(", "),
+    selectedIndices: selected,
+  };
+}
 const configured = firebaseConfig.apiKey && !firebaseConfig.apiKey.startsWith("YOUR_")
   && firebaseConfig.projectId && !firebaseConfig.projectId.startsWith("YOUR_")
   && firebaseConfig.appId && !firebaseConfig.appId.startsWith("YOUR_");
@@ -81,6 +98,7 @@ function startQuickfire() {
   let choiceSelection = new Set();
   let currentAnswers = [];
   let testDraftId = null;
+  let attemptSubmitted = false;
   let sessionListUnsubscribe = null;
   let resultsUnsubscribe = null;
 
@@ -194,20 +212,6 @@ function startQuickfire() {
       const correct = question?.correctIndices || (Number.isInteger(question?.correctIndex) ? [question.correctIndex] : []);
       addTextarea("type-correct-indices", type === "multi" ? "Correct options (letters, comma separated)" : "Correct option (letter)", correct.map((index) => String.fromCharCode(65 + index)).join(","), type === "multi" ? "A,C" : "B");
       if (type === "truefalse") $("#type-choice-list").readOnly = true;
-    } else if (type === "short") {
-      addTextarea("type-accepted-answers", "Accepted answers (one per line)", (question?.acceptedAnswers || []).join("\n"), "Example answer\nAlternate spelling");
-    } else if (type === "number") {
-      const row = document.createElement("div");
-      row.className = "form-two-column cloud-type-fields";
-      row.innerHTML = '<div><label for="type-correct-number">Correct number</label><input id="type-correct-number" type="number" step="any" required></div><div><label for="type-number-tolerance">Allowed tolerance</label><input id="type-number-tolerance" type="number" step="any" min="0" value="0"></div>';
-      if (Number.isFinite(Number(question?.correctNumber))) row.querySelector("#type-correct-number").value = question.correctNumber;
-      row.querySelector("#type-number-tolerance").value = String(question?.tolerance ?? 0);
-      host.append(row);
-    } else {
-      const help = document.createElement("p");
-      help.className = "cloud-type-help";
-      help.textContent = "Students submit written answers for teacher review.";
-      host.append(help);
     }
   }
 
@@ -296,7 +300,7 @@ function startQuickfire() {
       title.textContent = test.title;
       title.addEventListener("click", () => selectTest(test.id));
       const details = document.createElement("span");
-      details.textContent = `${test.questionCount || 0} questions · teacher reviewed`;
+      details.textContent = `${test.questionCount || 0} questions · automatic scoring`;
       info.append(title, details);
       const actions = document.createElement("div");
       actions.className = "cloud-row-actions";
@@ -355,21 +359,21 @@ function startQuickfire() {
   $("#create-sample-test").addEventListener("click", async () => {
     if (!teacherUid) return;
     try {
-      const testId = `sample-${teacherUid}`;
+      const testId = `sample-auto-${teacherUid}`;
       const testRef = doc(db, "tests", testId);
       if (!(await getDoc(testRef)).exists()) {
         const samples = [
-          "Describe one way exercise benefits the body.",
-          "Explain why plants need sunlight.",
-          "Describe how a character changes in a story you have read.",
-          "Explain one cause and one effect of a historical event.",
-          "Show your working for a problem that uses fractions.",
-          "Write a short explanation of a science concept you have studied.",
+          { prompt: "Which type of graphic is made from scalable paths and shapes?", type: "choice", choices: ["Raster", "Vector", "Bitmap only", "Photographic"], correctIndices: [1] },
+          { prompt: "Which file format commonly supports transparent backgrounds?", type: "choice", choices: ["JPG", "BMP", "PNG", "TXT"], correctIndices: [2] },
+          { prompt: "Which tool is typically used to select and move individual anchor points in vector artwork?", type: "choice", choices: ["Direct Selection", "Paint Bucket", "Crop", "Blur"], correctIndices: [0] },
+          { prompt: "Which are common reasons to use a layer in a graphics application? Select all that apply.", type: "multi", choices: ["Edit elements independently", "Reorder artwork", "Increase monitor brightness", "Hide an element without deleting it"], correctIndices: [0, 1, 3] },
+          { prompt: "A raster image is composed of pixels.", type: "truefalse", choices: ["True", "False"], correctIndices: [0] },
+          { prompt: "Which color model is generally used for material prepared for print?", type: "choice", choices: ["RGB", "CMYK", "HSL only", "Hexadecimal only"], correctIndices: [1] },
         ];
         const batch = writeBatch(db);
         batch.set(testRef, {
           ownerUid: teacherUid,
-          title: "Question type sampler",
+          title: "Computer applications and graphics sampler",
           feedbackMode: "end",
           speedBonus: false,
           noTimeLimit: true,
@@ -377,24 +381,19 @@ function startQuickfire() {
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
-        samples.forEach((prompt, order) => {
+        samples.forEach((question, order) => {
           batch.set(doc(db, "tests", testId, "questions", `sample-${order + 1}`), {
-            prompt,
-            type: "written",
+            ...question,
+            order,
             marks: 5,
             timeLimit: 120,
-            choices: [],
-            teacherGuidance: "",
-            explanation: "",
-            optionFeedback: [],
-            order,
           });
         });
         await batch.commit();
       }
       await loadTests();
       await selectTest(testId);
-      setMessage($("#teacher-message"), "Sample test is ready. This Spark version uses teacher-reviewed answers.");
+      setMessage($("#teacher-message"), "Sample test is ready. Students will see their score when they finish.");
     } catch (error) {
       setMessage($("#teacher-message"), explainError(error), true);
     }
@@ -452,14 +451,15 @@ function startQuickfire() {
   });
 
   function editQuestion(question) {
+    if (!SUPPORTED_QUESTION_TYPES.includes(question.type)) {
+      setMessage($("#teacher-message"), "This older question type cannot be auto-marked. Delete it and create a multiple-choice, select-all, or true/false question.", true);
+      return;
+    }
     editingQuestionId = question.id;
     $("#question-prompt").value = question.prompt || "";
     $("#question-type").value = question.type || "choice";
     $("#question-marks").value = String(question.marks || 2);
     $("#question-time").value = String(question.timeLimit || 30);
-    $("#question-explanation").value = question.explanation || "";
-    $("#question-option-feedback").value = (question.optionFeedback || []).join("\n");
-    $("#question-guidance").value = question.teacherGuidance || "";
     $("#question-form-heading").textContent = "Edit question";
     $("#save-question-button").textContent = "Save changes";
     $("#cancel-question-edit").hidden = false;
@@ -474,27 +474,17 @@ function startQuickfire() {
       type,
       marks: Number($("#question-marks").value),
       timeLimit: Number($("#question-time").value),
-      explanation: $("#question-explanation").value.trim(),
-      optionFeedback: $("#question-option-feedback").value.split(/\r?\n/).map((value) => value.trim()),
-      teacherGuidance: $("#question-guidance").value.trim(),
     };
     if (!question.prompt) throw new Error("Enter the question text.");
-    if (["choice", "multi", "truefalse"].includes(type)) {
-      question.choices = type === "truefalse" ? ["True", "False"] : $("#type-choice-list").value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
-      const letters = $("#type-correct-indices").value.toUpperCase().split(/[\s,]+/).filter(Boolean);
-      question.correctIndices = [...new Set(letters.map((letter) => letter.charCodeAt(0) - 65))];
-      if (type !== "truefalse" && question.choices.length < 2) throw new Error("Add at least two answer choices.");
-      if (question.correctIndices.some((index) => index < 0 || index >= question.choices.length)) throw new Error("Correct options must refer to choices in the list.");
-      if (type !== "multi" && question.correctIndices.length !== 1) throw new Error("Choose exactly one correct option.");
-      if (type === "multi" && question.correctIndices.length < 1) throw new Error("Choose at least one correct option.");
-    } else if (type === "short") {
-      question.acceptedAnswers = $("#type-accepted-answers").value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
-      if (!question.acceptedAnswers.length) throw new Error("Add at least one accepted answer.");
-    } else if (type === "number") {
-      question.correctNumber = Number($("#type-correct-number").value);
-      question.tolerance = Number($("#type-number-tolerance").value || 0);
-      if (!Number.isFinite(question.correctNumber) || !Number.isFinite(question.tolerance) || question.tolerance < 0) throw new Error("Enter a valid number and a non-negative tolerance.");
-    }
+    if (!SUPPORTED_QUESTION_TYPES.includes(type)) throw new Error("Choose a supported automatic-marking question type.");
+    question.choices = type === "truefalse" ? ["True", "False"] : $("#type-choice-list").value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+    const letters = $("#type-correct-indices").value.toUpperCase().split(/[\s,]+/).filter(Boolean);
+    question.correctIndices = [...new Set(letters.map((letter) => letter.charCodeAt(0) - 65))];
+    if (type !== "truefalse" && question.choices.length < 2) throw new Error("Add at least two answer choices.");
+    if (question.choices.length > 20) throw new Error("Use at most 20 answer choices.");
+    if (question.correctIndices.some((index) => index < 0 || index >= question.choices.length)) throw new Error("Correct options must refer to choices in the list.");
+    if (type !== "multi" && question.correctIndices.length !== 1) throw new Error("Choose exactly one correct option.");
+    if (type === "multi" && question.correctIndices.length < 1) throw new Error("Choose at least one correct option.");
     return question;
   }
 
@@ -606,6 +596,9 @@ function startQuickfire() {
       const sessionRef = doc(collection(db, "sessions"));
       const sessionQuestions = questionSnapshot.docs.map((item, order) => {
         const question = item.data();
+        if (!SUPPORTED_QUESTION_TYPES.includes(question.type)) {
+          throw new Error(`Question ${order + 1} is not an auto-markable option question. Remove it or change it to multiple choice, select all, or true/false.`);
+        }
         const marks = Number(question.marks) || 2;
         if (!Number.isSafeInteger(marks) || marks < 1 || marks > 100) {
           throw new Error(`Question ${order + 1} has an invalid mark value. Edit it and try again.`);
@@ -659,9 +652,6 @@ function startQuickfire() {
           ...answerKey,
           ...publicQuestion,
           id: publicQuestion.id,
-          explanation: cleanClientText(answerKey.explanation, 2000),
-          teacherGuidance: cleanClientText(answerKey.teacherGuidance, 2000),
-          optionFeedback: Array.isArray(answerKey.optionFeedback) ? answerKey.optionFeedback : [],
         });
       });
       batch.update(sessionRef, { status: "open" });
@@ -750,33 +740,6 @@ function startQuickfire() {
   }
 
   let currentResultRows = [];
-  async function saveManualMark(session, attempt, response, mark) {
-    if (!Number.isInteger(mark) || mark < 0 || mark > response.maxMarks) {
-      throw new Error("Choose a valid mark for this answer.");
-    }
-    await updateDoc(doc(db, "sessions", session.id, "attempts", attempt.id, "responses", response.id), {
-      score: mark,
-      gradedAt: serverTimestamp(),
-    });
-    loadSessionResults(session);
-  }
-
-  function describeAnswerKey(question) {
-    if (["choice", "truefalse", "multi"].includes(question.type)) {
-      const correctIndices = Array.isArray(question.correctIndices)
-        ? question.correctIndices
-        : Number.isInteger(question.correctIndex) ? [question.correctIndex] : [];
-      const choices = question.type === "truefalse" ? ["True", "False"] : question.choices || [];
-      return correctIndices.map((index) => choices[index]).filter(Boolean).join(", ");
-    }
-    if (question.type === "short") return (question.acceptedAnswers || []).join(" / ");
-    if (question.type === "number") {
-      const tolerance = Number(question.tolerance) || 0;
-      return tolerance ? `${question.correctNumber} ± ${tolerance}` : String(question.correctNumber ?? "");
-    }
-    return "";
-  }
-
   function cleanClientText(value, max) { return typeof value === "string" ? value.trim().slice(0, max) : ""; }
 
   $("#student-join-form").addEventListener("submit", async (event) => {
@@ -825,6 +788,9 @@ function startQuickfire() {
         ...sessionSnapshot.data(),
         questions: questionsSnapshot.docs.map((item) => ({ id: item.id, ...item.data() })),
       };
+      if (session.questions.some((question) => !SUPPORTED_QUESTION_TYPES.includes(question.type))) {
+        throw new Error("This session has an older question type that cannot be auto-marked. Ask the teacher to create a new option-based session.");
+      }
       const attemptRef = doc(studentDb, "sessions", session.id, "attempts", credential.user.uid);
       await setDoc(attemptRef, {
         ownerUid: credential.user.uid,
@@ -839,6 +805,7 @@ function startQuickfire() {
       activeAttemptId = credential.user.uid;
       activeQuestionIndex = 0;
       currentAnswers = [];
+      attemptSubmitted = false;
       $("#active-session-code").textContent = `JOIN CODE · ${session.joinCode}`;
       $("#active-session-title").textContent = `${session.title} · ${name}`;
       $("#student-question-screen").hidden = false;
@@ -872,7 +839,7 @@ function startQuickfire() {
     $("#student-timer").textContent = question.timeLimit ? formatSeconds(question.timeLimit) : "";
     $("#student-answer-feedback").textContent = "";
     $("#student-answer-feedback").className = "modal-answer-feedback";
-    $("#student-submit-answer").disabled = question.type === "choice" || question.type === "truefalse" ? true : true;
+    $("#student-submit-answer").disabled = true;
     $("#student-submit-answer").dataset.advance = "false";
     $("#student-submit-answer").textContent = "Submit answer";
 
@@ -908,16 +875,7 @@ function startQuickfire() {
         host.append(button);
       });
     } else {
-      const input = document.createElement(question.type === "written" ? "textarea" : "input");
-      input.className = `student-answer-input${question.type === "written" ? " text-long" : ""}`;
-      input.id = "student-answer-input";
-      input.autocomplete = "off";
-      input.placeholder = question.type === "written" ? "Write your explanation…" : question.type === "number" ? "Enter a number" : "Type your answer";
-      if (question.type === "written") input.rows = 5;
-      if (question.type === "number") { input.type = "number"; input.step = "any"; }
-      input.addEventListener("input", () => { $("#student-submit-answer").disabled = !input.value.trim(); });
-      host.append(input);
-      $("#student-submit-answer").disabled = true;
+      throw new Error("This session contains an unsupported question type. Ask the teacher to create a new option-based session.");
     }
     if (!activeQuiz.noTimeLimit && question.timeLimit) startStudentTimer(question.timeLimit, startedAt);
   }
@@ -955,8 +913,7 @@ function startQuickfire() {
     const type = getCurrentQuestion().type;
     if (type === "multi") return [...choiceSelection].sort((a, b) => a - b);
     if (type === "choice" || type === "truefalse") return [...choiceSelection][0];
-    const value = $("#student-answer-input")?.value.trim() || "";
-    return type === "number" && value !== "" ? Number(value) : value;
+    throw new Error("This session contains an unsupported question type.");
   }
 
   async function submitCurrentAnswer(timedOut = false) {
@@ -982,11 +939,9 @@ function startQuickfire() {
       });
       currentAnswers.push({ questionId: question.id, answer });
       const feedback = $("#student-answer-feedback");
-      feedback.textContent = "Answer saved. Your teacher will review and mark it.";
+      feedback.textContent = "Answer saved. Finish the test to see your automatic result.";
       feedback.className = "modal-answer-feedback is-pending";
       $$(".student-answer-option").forEach((button) => { button.disabled = true; });
-      const input = $("#student-answer-input");
-      if (input) input.disabled = true;
       const next = $("#student-submit-answer");
       next.disabled = false;
       next.innerHTML = activeQuestionIndex === activeQuiz.questions.length - 1 ? 'Finish test <span aria-hidden="true">→</span>' : 'Continue <span aria-hidden="true">→</span>';
@@ -1026,22 +981,61 @@ function startQuickfire() {
 
   async function finishStudentAttempt() {
     $("#student-submit-answer").disabled = true;
+    $("#student-result-retry").disabled = true;
     setMessage($("#student-answer-feedback"), "Saving your result…");
     try {
-      await updateDoc(doc(studentDb, "sessions", activeQuiz.id, "attempts", activeAttemptId), {
-        status: "submitted",
-        submittedAt: serverTimestamp(),
-      });
+      if (!attemptSubmitted) {
+        const attemptRef = doc(studentDb, "sessions", activeQuiz.id, "attempts", activeAttemptId);
+        try {
+          await updateDoc(attemptRef, {
+            status: "submitted",
+            submittedAt: serverTimestamp(),
+          });
+        } catch (error) {
+          const attemptSnapshot = await getDoc(attemptRef);
+          if (!attemptSnapshot.exists() || attemptSnapshot.data().status !== "submitted") throw error;
+        }
+        attemptSubmitted = true;
+      }
       stopStudentTimer();
       $("#student-question-screen").hidden = true;
       $("#student-result-screen").hidden = false;
-      $("#student-result-summary").textContent = `${currentAnswers.length} answer${currentAnswers.length === 1 ? "" : "s"} saved. Your teacher will review them; this free Spark version does not automatically score answers.`;
-      renderStudentEndFeedback([]);
+      $("#student-result-summary").textContent = "Calculating your score…";
+      $("#student-result-error").textContent = "";
+      $("#student-result-retry").hidden = true;
+      const answersByQuestion = new Map(currentAnswers.map((item) => [item.questionId, item.answer]));
+      const results = await Promise.all(activeQuiz.questions.map(async (question) => {
+        const keySnapshot = await getDoc(doc(studentDb, "sessions", activeQuiz.id, "answerKeys", question.id));
+        if (!keySnapshot.exists()) throw new Error("The answer key for this session is unavailable.");
+        const result = gradeAnswer(keySnapshot.data(), answersByQuestion.get(question.id));
+        return { prompt: question.prompt, type: question.type, ...result };
+      }));
+      const score = results.reduce((sum, result) => sum + result.score, 0);
+      const correctCount = results.filter((result) => result.correct).length;
+      $("#student-result-summary").textContent = `${score} / ${activeQuiz.maxMarks} marks · ${correctCount} of ${results.length} correct.`;
+      renderStudentEndFeedback(results);
+      $("#student-result-retry").disabled = false;
     } catch (error) {
-      $("#student-submit-answer").disabled = false;
-      setMessage($("#student-answer-feedback"), explainError(error), true);
+      if (attemptSubmitted) {
+        stopStudentTimer();
+        $("#student-question-screen").hidden = true;
+        $("#student-result-screen").hidden = false;
+        $("#student-result-summary").textContent = "Your answers were submitted, but we couldn't calculate the score.";
+        setMessage($("#student-result-error"), explainError(error), true);
+        $("#student-result-retry").hidden = false;
+        $("#student-result-retry").disabled = false;
+      } else {
+        const submit = $("#student-submit-answer");
+        submit.disabled = false;
+        submit.dataset.advance = "true";
+        submit.innerHTML = 'Finish test <span aria-hidden="true">→</span>';
+        setMessage($("#student-answer-feedback"), explainError(error), true);
+        $("#student-result-retry").disabled = false;
+      }
     }
   }
+
+  $("#student-result-retry").addEventListener("click", finishStudentAttempt);
 
   function renderStudentEndFeedback(items) {
     const host = $("#student-end-feedback");
@@ -1053,17 +1047,11 @@ function startQuickfire() {
       const title = document.createElement("strong");
       title.textContent = `${index + 1}. ${item.prompt}`;
       article.append(title);
-      if (item.type !== "written") {
-        const status = document.createElement("p");
-        status.textContent = item.correct ? `Correct · ${item.score}/${item.maxMarks} marks` : `Incorrect · 0/${item.maxMarks} marks${item.correctAnswer ? ` · Answer: ${item.correctAnswer}` : ""}`;
-        article.append(status);
-      }
-      const options = (item.selectedIndices || []).map((selected) => item.optionFeedback?.[selected]).filter(Boolean);
-      [...options, item.explanation].filter(Boolean).forEach((text) => {
-        const paragraph = document.createElement("p");
-        paragraph.textContent = text;
-        article.append(paragraph);
-      });
+      const status = document.createElement("p");
+      status.textContent = item.correct
+        ? `Correct · ${item.score}/${item.maxMarks} marks`
+        : `Incorrect · 0/${item.maxMarks} marks${item.correctAnswer ? ` · Correct answer: ${item.correctAnswer}` : ""}`;
+      article.append(status);
       if (article.children.length > 1) host.append(article);
     });
     host.hidden = host.children.length === 0;
@@ -1101,11 +1089,16 @@ function startQuickfire() {
           const responses = await Promise.all(responsesSnapshot.docs.map(async (item) => {
             const response = { id: item.id, ...item.data() };
             const answerKeySnapshot = await getDoc(doc(db, "sessions", session.id, "answerKeys", response.id));
-            const answerKey = answerKeySnapshot.exists() ? answerKeySnapshot.data() : {};
+            if (!answerKeySnapshot.exists()) throw new Error("An answer key is missing for this session.");
+            const answerKey = answerKeySnapshot.data();
+            const grade = gradeAnswer(answerKey, response.answer);
+            const choices = answerKey.type === "truefalse" ? ["True", "False"] : answerKey.choices || [];
             return {
               ...response,
-              expectedAnswer: describeAnswerKey(answerKey),
-              teacherGuidance: answerKey.teacherGuidance || "",
+              ...grade,
+              answerLabel: Array.isArray(response.answer)
+                ? response.answer.map((index) => choices[index]).filter(Boolean).join(", ")
+                : Number.isInteger(response.answer) ? choices[response.answer] || "" : "No answer",
             };
           }));
           currentResultRows.push({ attempt, responses });
@@ -1116,55 +1109,19 @@ function startQuickfire() {
           const earned = responses.reduce((sum, response) => sum + (Number(response.score) || 0), 0);
           score.textContent = `${earned} / ${session.maxMarks}`;
           const status = document.createElement("td");
-          const pending = responses.filter((response) => typeof response.score !== "number").length;
-          status.textContent = attempt.status === "submitted" ? pending ? `${pending} to mark` : "Reviewed" : "In progress";
+          const correctCount = responses.filter((response) => response.correct).length;
+          status.textContent = attempt.status === "submitted" ? `${correctCount}/${session.questionCount} correct` : "In progress";
           const submitted = document.createElement("td");
           submitted.textContent = attempt.submittedAt?.toDate ? attempt.submittedAt.toDate().toLocaleString() : "—";
           const answers = document.createElement("td");
-          answers.className = "written-review-cell";
+          answers.className = "answer-review-cell";
           responses.forEach((response) => {
             const item = document.createElement("div");
             const prompt = document.createElement("strong");
             prompt.textContent = response.prompt;
             const answer = document.createElement("p");
-            answer.textContent = response.answer || "No response";
+            answer.textContent = `${response.answerLabel || "No answer"} · ${response.correct ? "Correct" : `Incorrect${response.correctAnswer ? ` · Correct answer: ${response.correctAnswer}` : ""}`} (${response.score}/${response.maxMarks})`;
             item.append(prompt, answer);
-            if (response.expectedAnswer) {
-              const expected = document.createElement("p");
-              expected.textContent = `Expected answer: ${response.expectedAnswer}`;
-              item.append(expected);
-            }
-            if (response.teacherGuidance) {
-              const guidance = document.createElement("p");
-              guidance.textContent = `Marking guidance: ${response.teacherGuidance}`;
-              item.append(guidance);
-            }
-            if (typeof response.score !== "number") {
-              const select = document.createElement("select");
-              select.setAttribute("aria-label", `Marks for answer out of ${response.maxMarks}`);
-              for (let mark = 0; mark <= response.maxMarks; mark += 1) {
-                const option = document.createElement("option");
-                option.value = String(mark);
-                option.textContent = `${mark}/${response.maxMarks}`;
-                select.append(option);
-              }
-              const save = document.createElement("button");
-              save.type = "button";
-              save.className = "grade-written";
-              save.textContent = "Save mark";
-              save.addEventListener("click", async () => {
-                try {
-                  await saveManualMark(session, attempt, response, Number(select.value));
-                } catch (error) {
-                  setMessage($("#teacher-message"), explainError(error), true);
-                }
-              });
-              item.append(select, save);
-            } else {
-              const grade = document.createElement("span");
-              grade.textContent = `${response.score}/${response.maxMarks} marks`;
-              item.append(grade);
-            }
             answers.append(item);
           });
           row.append(name, score, status, submitted, answers);
@@ -1183,7 +1140,7 @@ function startQuickfire() {
     const lines = [["join_code", "student_name", "score", "max_marks", "status", "submitted_at", "answers"].map(quote).join(",")];
     currentResultRows.forEach(({ attempt, responses }) => {
       const answers = responses
-        .map((response) => `${response.prompt}: ${response.answer || "No response"} (${response.score ?? "unmarked"}/${response.maxMarks})`).join(" | ");
+        .map((response) => `${response.prompt}: ${response.answerLabel || "No answer"} (${response.score}/${response.maxMarks})`).join(" | ");
       lines.push([selectedSession.joinCode, attempt.studentName,
         responses.reduce((sum, response) => sum + (Number(response.score) || 0), 0), selectedSession.maxMarks, attempt.status,
         attempt.submittedAt?.toDate ? attempt.submittedAt.toDate().toISOString() : "", answers].map(quote).join(","));
@@ -1206,14 +1163,50 @@ function startQuickfire() {
     }
   }
 
+  function normalizeLegacyQuestion(question, order) {
+    if (!question || !SUPPORTED_QUESTION_TYPES.includes(question.type)) return null;
+    const prompt = cleanClientText(question.prompt, 1000);
+    if (!prompt) return null;
+    const type = question.type;
+    const choices = type === "truefalse"
+      ? ["True", "False"]
+      : Array.isArray(question.choices)
+        ? question.choices.map((choice) => cleanClientText(choice, 200)).filter(Boolean).slice(0, 20)
+        : [];
+    const correctIndices = Array.isArray(question.correctIndices)
+      ? [...new Set(question.correctIndices.filter(Number.isInteger))]
+      : Number.isInteger(question.correctIndex) ? [question.correctIndex] : [];
+    if (type !== "truefalse" && choices.length < 2) return null;
+    if (correctIndices.length < 1 || correctIndices.some((index) => index < 0 || index >= choices.length)) return null;
+    if (type !== "multi" && correctIndices.length !== 1) return null;
+    const marks = Number(question.marks);
+    return {
+      prompt,
+      type,
+      marks: Number.isSafeInteger(marks) && marks >= 1 && marks <= 100 ? marks : 2,
+      timeLimit: Number.isSafeInteger(Number(question.timeLimit)) && Number(question.timeLimit) > 0
+        ? Number(question.timeLimit)
+        : 30,
+      choices,
+      correctIndices,
+      order,
+    };
+  }
+
   $("#import-local-tests").addEventListener("click", async () => {
     if (!teacherUid) return;
     try {
       const oldTests = parseLegacyTests();
       const importedLegacyIds = new Set(tests.map((test) => test.legacyId).filter(Boolean));
       let count = 0;
+      let skippedQuestions = 0;
       for (const oldTest of oldTests) {
         if (importedLegacyIds.has(oldTest.id)) continue;
+        const questions = oldTest.questions
+          .map((question, order) => normalizeLegacyQuestion(question, order))
+          .filter(Boolean);
+        skippedQuestions += oldTest.questions.length - questions.length;
+        if (!questions.length) continue;
         const testRef = await addDoc(collection(db, "tests"), {
           ownerUid: teacherUid,
           title: cleanClientText(oldTest.title, 100) || "Imported test",
@@ -1221,30 +1214,20 @@ function startQuickfire() {
           feedbackMode: "end",
           speedBonus: false,
           noTimeLimit: oldTest.noTimeLimit === true,
-          questionCount: oldTest.questions.length,
+          questionCount: questions.length,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
         const batch = writeBatch(db);
-        oldTest.questions.forEach((question, order) => {
-          const type = ["choice", "multi", "truefalse", "short", "number", "written"].includes(question.type) ? question.type : "choice";
-          const correctIndices = Array.isArray(question.correctIndices) ? question.correctIndices : Number.isInteger(question.correctIndex) ? [question.correctIndex] : [];
-          batch.set(doc(db, "tests", testRef.id, "questions", `legacy-${order}`), {
-            prompt: cleanClientText(question.prompt, 1000), type, marks: Number(question.marks) || 2,
-            timeLimit: Number(question.timeLimit) || (type === "written" ? 120 : 30),
-            choices: type === "truefalse" ? ["True", "False"] : Array.isArray(question.choices) ? question.choices : [],
-            correctIndices, acceptedAnswers: Array.isArray(question.acceptedAnswers) ? question.acceptedAnswers : [],
-            correctNumber: Number.isFinite(Number(question.correctNumber)) ? Number(question.correctNumber) : null,
-            tolerance: Number(question.tolerance) || 0, explanation: cleanClientText(question.explanation, 2000),
-            optionFeedback: Array.isArray(question.optionFeedback) ? question.optionFeedback : [],
-            teacherGuidance: cleanClientText(question.guidance || question.teacherGuidance, 2000), order,
-          });
+        questions.forEach((question) => {
+          batch.set(doc(db, "tests", testRef.id, "questions", `legacy-${question.order}`), question);
         });
         await batch.commit();
         count += 1;
       }
       await loadTests();
-      setMessage($("#teacher-message"), `${count} local ${count === 1 ? "test" : "tests"} imported. The original local data was not removed.`);
+      const skippedMessage = skippedQuestions ? ` Skipped ${skippedQuestions} unsupported or invalid ${skippedQuestions === 1 ? "question" : "questions"}.` : "";
+      setMessage($("#teacher-message"), `${count} local ${count === 1 ? "test" : "tests"} imported.${skippedMessage} The original local data was not removed.`);
     } catch (error) {
       setMessage($("#teacher-message"), explainError(error), true);
     }
