@@ -333,7 +333,6 @@ function startQuickfire() {
     selectedQuestions = questionSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
     $("#test-settings-form").hidden = false;
     $("#test-title-input").value = test.title;
-    $("#test-feedback-mode").value = "end";
     $("#test-speed-bonus").checked = false;
     $("#test-no-time-limit").checked = test.noTimeLimit === true;
     clearQuestionEditor();
@@ -347,7 +346,6 @@ function startQuickfire() {
     testDraftId = newId(collection(db, "tests"));
     $("#test-settings-form").hidden = false;
     $("#test-title-input").value = "";
-    $("#test-feedback-mode").value = "end";
     $("#test-speed-bonus").checked = false;
     $("#test-no-time-limit").checked = false;
     clearQuestionEditor();
