@@ -28,11 +28,11 @@ import { firebaseConfig } from "./firebase-config.js";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-const CODE_PATTERN = /^[A-HJ-NP-Z2-9]{12}$/;
+const CODE_PATTERN = /^(?:[A-HJ-NP-Z2-9]{6}|[A-HJ-NP-Z2-9]{12})$/;
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const SUPPORTED_QUESTION_TYPES = ["choice", "multi", "truefalse"];
 function makeJoinCode() {
-  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  const bytes = crypto.getRandomValues(new Uint8Array(6));
   return [...bytes].map((byte) => CODE_ALPHABET[byte % CODE_ALPHABET.length]).join("");
 }
 const TYPE_LABELS = {
@@ -95,11 +95,16 @@ function startQuickfire() {
   let activeAttemptId = null;
   let timerId = null;
   let answerSubmitted = false;
+  let currentAnswerSaved = false;
+  let currentQuestionTimedOut = false;
   let choiceSelection = new Set();
   let currentAnswers = [];
   let testDraftId = null;
+  let questionBuilderFinished = false;
   let attemptSubmitted = false;
   let sessionListUnsubscribe = null;
+  const sessionAttemptUnsubscribers = new Map();
+  const sessionAttemptCounts = new Map();
   let resultsUnsubscribe = null;
 
   const teacherLoginDialog = $("#teacher-login-dialog");
@@ -128,6 +133,11 @@ function startQuickfire() {
     if (!teacherUid && sessionListUnsubscribe) {
       sessionListUnsubscribe();
       sessionListUnsubscribe = null;
+    }
+    if (!teacherUid) {
+      sessionAttemptUnsubscribers.forEach((unsubscribe) => unsubscribe());
+      sessionAttemptUnsubscribers.clear();
+      sessionAttemptCounts.clear();
     }
     if (!teacherUid && resultsUnsubscribe) {
       resultsUnsubscribe();
@@ -220,7 +230,6 @@ function startQuickfire() {
     $("#cloud-question-form").reset();
     $("#question-form-heading").textContent = "Add a question";
     $("#save-question-button").textContent = "Add question";
-    $("#cancel-question-edit").hidden = true;
     $("#question-marks").value = "2";
     $("#question-time").value = "30";
     renderTypeEditor();
@@ -235,12 +244,13 @@ function startQuickfire() {
     const list = $("#test-question-list");
     list.replaceChildren();
     $("#selected-test-total").textContent = selectedQuestions.length ? `${selectedQuestions.length} · ${selectedQuestions.reduce((sum, q) => sum + (Number(q.marks) || 0), 0)} marks` : "0 questions";
-      $("#select-test-message").hidden = Boolean(selectedTest);
-      if (testDraftId) $("#select-test-message").textContent = "Save this test before adding questions.";
-      else $("#select-test-message").textContent = "Choose or create a test to edit its questions.";
-      $("#cloud-question-form").hidden = !selectedTest;
-    $("#add-question-button").hidden = !selectedTest || Boolean(testDraftId);
-    $("#test-question-list").hidden = !selectedTest;
+    const hasSelectedTest = Boolean(selectedTest || testDraftId);
+    $("#select-test-message").hidden = hasSelectedTest;
+    $("#select-test-message").textContent = "Choose or create a test to edit its questions.";
+    $("#cloud-question-form").hidden = !hasSelectedTest || questionBuilderFinished;
+    $("#add-question-button").hidden = !selectedTest || !questionBuilderFinished;
+    $("#test-question-list").hidden = !hasSelectedTest;
+    $("#question-overview-empty").hidden = selectedQuestions.length > 0;
 
     selectedQuestions.forEach((question, index) => {
       const row = document.createElement("article");
@@ -331,6 +341,7 @@ function startQuickfire() {
     const questionQuery = query(collection(db, "tests", testId, "questions"), orderBy("order"));
     const questionSnapshot = await getDocs(questionQuery);
     selectedQuestions = questionSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    questionBuilderFinished = false;
     $("#test-settings-form").hidden = false;
     $("#test-title-input").value = test.title;
     $("#test-speed-bonus").checked = false;
@@ -344,13 +355,13 @@ function startQuickfire() {
     selectedTest = null;
     selectedQuestions = [];
     testDraftId = newId(collection(db, "tests"));
+    questionBuilderFinished = false;
     $("#test-settings-form").hidden = false;
     $("#test-title-input").value = "";
     $("#test-speed-bonus").checked = false;
     $("#test-no-time-limit").checked = false;
     clearQuestionEditor();
     $("#cloud-question-form").hidden = false;
-    $("#add-question-button").hidden = true;
     renderQuestions();
   });
 
@@ -401,16 +412,16 @@ function startQuickfire() {
     testDraftId = null;
     selectedTest = null;
     selectedQuestions = [];
+    questionBuilderFinished = false;
     $("#test-settings-form").hidden = true;
     clearQuestionEditor();
     renderQuestions();
   });
 
-  $("#test-settings-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    if (!teacherUid) return;
+  async function saveTestSettings() {
+    if (!teacherUid) throw new Error("Sign in as a teacher before saving this test.");
     const title = $("#test-title-input").value.trim();
-    if (!title) return;
+    if (!title) throw new Error("Enter a test title.");
     const settings = {
       ownerUid: teacherUid,
       title,
@@ -418,23 +429,55 @@ function startQuickfire() {
       speedBonus: false,
       noTimeLimit: $("#test-no-time-limit").checked,
       questionCount: selectedQuestions.length,
-      updatedAt: serverTimestamp(),
     };
+    if (testDraftId) {
+      const testId = testDraftId;
+      await setDoc(doc(db, "tests", testId), {
+        ...settings,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      selectedTest = { id: testId, ...settings, createdAt: new Date(), updatedAt: new Date() };
+      testDraftId = null;
+    } else if (selectedTest) {
+      await updateDoc(doc(db, "tests", selectedTest.id), {
+        ...settings,
+        updatedAt: serverTimestamp(),
+      });
+      selectedTest = { ...selectedTest, ...settings, updatedAt: new Date() };
+    } else {
+      throw new Error("Create or select a test before saving.");
+    }
+    await loadTests();
+  }
+
+  $("#test-settings-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
     try {
-      if (testDraftId) {
-        settings.createdAt = serverTimestamp();
-        await setDoc(doc(db, "tests", testDraftId), settings);
-        selectedTest = { id: testDraftId, ...settings, updatedAt: new Date() };
-        testDraftId = null;
-      } else if (selectedTest) {
-        await updateDoc(doc(db, "tests", selectedTest.id), settings);
-        selectedTest = { ...selectedTest, ...settings };
-      }
+      await saveTestSettings();
       setMessage($("#teacher-message"), "Test saved.");
-      await loadTests();
-      if (selectedTest) await selectTest(selectedTest.id);
+      renderQuestions();
     } catch (error) {
       setMessage($("#teacher-message"), explainError(error), true);
+    }
+  });
+
+  $("#finish-test-button").addEventListener("click", async () => {
+    if (!selectedQuestions.length) {
+      setMessage($("#question-editor-message"), "Add at least one question before finishing this test.", true);
+      return;
+    }
+    if (editingQuestionId || $("#question-prompt").value.trim()) {
+      setMessage($("#question-editor-message"), "Add or save the question you are editing before finishing the test.", true);
+      return;
+    }
+    try {
+      await saveTestSettings();
+      questionBuilderFinished = true;
+      renderQuestions();
+      setMessage($("#teacher-message"), "Test saved and ready to use.");
+    } catch (error) {
+      setMessage($("#question-editor-message"), explainError(error), true);
     }
   });
 
@@ -443,9 +486,9 @@ function startQuickfire() {
     editingQuestionId = null;
     $("#question-form-heading").textContent = "Add a question";
     $("#save-question-button").textContent = "Add question";
-    $("#cancel-question-edit").hidden = true;
-    $("#cloud-question-form").hidden = false;
+    questionBuilderFinished = false;
     clearQuestionEditor();
+    renderQuestions();
   });
 
   function editQuestion(question) {
@@ -454,13 +497,14 @@ function startQuickfire() {
       return;
     }
     editingQuestionId = question.id;
+    questionBuilderFinished = false;
     $("#question-prompt").value = question.prompt || "";
     $("#question-type").value = question.type || "choice";
     $("#question-marks").value = String(question.marks || 2);
     $("#question-time").value = String(question.timeLimit || 30);
     $("#question-form-heading").textContent = "Edit question";
     $("#save-question-button").textContent = "Save changes";
-    $("#cancel-question-edit").hidden = false;
+    renderQuestions();
     renderTypeEditor(question);
     $("#cloud-question-form").scrollIntoView({ behavior: "smooth", block: "center" });
   }
@@ -492,23 +536,7 @@ function startQuickfire() {
     try {
       if (!selectedTest && !testDraftId) throw new Error("Save or create a test before adding questions.");
       const question = collectQuestion();
-      if (testDraftId) {
-        const title = $("#test-title-input").value.trim();
-        if (!title) throw new Error("Enter a test title before adding questions.");
-        const draftSettings = {
-          ownerUid: teacherUid,
-          title,
-          feedbackMode: "end",
-          speedBonus: false,
-          noTimeLimit: $("#test-no-time-limit").checked,
-          questionCount: 0,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        };
-        await setDoc(doc(db, "tests", testDraftId), draftSettings);
-        selectedTest = { id: testDraftId, ...draftSettings };
-        testDraftId = null;
-      }
+      await saveTestSettings();
       const testId = selectedTest.id;
       const questionCollection = collection(db, "tests", testId, "questions");
       if (editingQuestionId) {
@@ -524,6 +552,7 @@ function startQuickfire() {
       setMessage(message, "Question saved.");
       if (selectedTest) {
         await updateDoc(doc(db, "tests", testId), { questionCount: selectedQuestions.length, updatedAt: serverTimestamp() });
+        selectedTest = { ...selectedTest, questionCount: selectedQuestions.length };
         await loadTests();
       }
     } catch (error) {
@@ -535,8 +564,6 @@ function startQuickfire() {
     const snapshot = await getDocs(query(collection(db, "tests", testId, "questions"), orderBy("order")));
     return snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
   }
-
-  $("#cancel-question-edit").addEventListener("click", clearQuestionEditor);
 
   async function deleteQuestion(questionId) {
     if (!selectedTest || !confirm("Delete this question? Existing sessions keep their original snapshot.")) return;
@@ -685,9 +712,18 @@ function startQuickfire() {
     const host = $("#session-list");
     host.replaceChildren();
     $("#no-sessions-message").hidden = sessions.length > 0;
+    const sessionIds = new Set(sessions.map((session) => session.id));
+    sessionAttemptUnsubscribers.forEach((unsubscribe, sessionId) => {
+      if (!sessionIds.has(sessionId)) {
+        unsubscribe();
+        sessionAttemptUnsubscribers.delete(sessionId);
+        sessionAttemptCounts.delete(sessionId);
+      }
+    });
     sessions.forEach((session) => {
       const row = document.createElement("article");
       row.className = "cloud-session-row";
+      row.dataset.sessionId = session.id;
       const info = document.createElement("div");
       const title = document.createElement("strong");
       title.textContent = session.title;
@@ -697,7 +733,17 @@ function startQuickfire() {
       const status = document.createElement("span");
       status.className = `session-status${session.status === "closed" ? " is-closed" : ""}`;
       status.textContent = session.status;
-      info.append(title, code, status);
+      const attempts = document.createElement("span");
+      attempts.className = "session-attempt-count";
+      const attemptCount = sessionAttemptCounts.get(session.id);
+      attempts.textContent = attemptCount === undefined
+        ? "Loading attempts…"
+        : `${attemptCount} ${attemptCount === 1 ? "attempt" : "attempts"}`;
+      const created = document.createElement("span");
+      created.className = "session-created-date";
+      const createdAt = session.createdAt?.toDate?.();
+      created.textContent = createdAt ? `Created ${createdAt.toLocaleDateString()}` : "Creation date unavailable";
+      info.append(title, code, status, attempts, created);
       const actions = document.createElement("div");
       actions.className = "cloud-row-actions";
       const copyLink = document.createElement("button");
@@ -734,6 +780,26 @@ function startQuickfire() {
       actions.append(copyLink, copyCode, toggle, results);
       row.append(info, actions);
       host.append(row);
+      if (!sessionAttemptUnsubscribers.has(session.id)) {
+        const unsubscribe = onSnapshot(
+          collection(db, "sessions", session.id, "attempts"),
+          (snapshot) => {
+            sessionAttemptCounts.set(session.id, snapshot.size);
+            const currentRow = $$(".cloud-session-row", host).find((item) => item.dataset.sessionId === session.id);
+            const attemptLabel = currentRow && $(".session-attempt-count", currentRow);
+            if (attemptLabel) {
+              attemptLabel.textContent = `${snapshot.size} ${snapshot.size === 1 ? "attempt" : "attempts"}`;
+            }
+          },
+          (error) => {
+            setMessage($("#teacher-message"), explainError(error), true);
+            const currentRow = $$(".cloud-session-row", host).find((item) => item.dataset.sessionId === session.id);
+            const attemptLabel = currentRow && $(".session-attempt-count", currentRow);
+            if (attemptLabel) attemptLabel.textContent = "Attempts unavailable";
+          },
+        );
+        sessionAttemptUnsubscribers.set(session.id, unsubscribe);
+      }
     });
   }
 
@@ -745,7 +811,7 @@ function startQuickfire() {
     const code = $("#student-code").value.trim().toUpperCase();
     const name = $("#student-display-name").value.trim();
     if (!CODE_PATTERN.test(code)) {
-      setMessage($("#student-join-message"), "Enter a 12-character code. 0, O, 1, and I are not used.", true);
+      setMessage($("#student-join-message"), "Enter a 6-character code. Older sessions may still use 12 characters; 0, O, 1, and I are not used.", true);
       return;
     }
     if (!name || name.length > 60) {
@@ -823,6 +889,8 @@ function startQuickfire() {
   function renderStudentQuestion(startedAt = Date.now()) {
     stopStudentTimer();
     answerSubmitted = false;
+    currentAnswerSaved = false;
+    currentQuestionTimedOut = false;
     choiceSelection = new Set();
     const question = getCurrentQuestion();
     const host = $("#student-answer-controls");
@@ -835,17 +903,16 @@ function startQuickfire() {
     $("#student-timer-row").hidden = activeQuiz.noTimeLimit || !question.timeLimit;
     $("#student-time-text").textContent = question.timeLimit ? `Time allowed: ${formatSeconds(question.timeLimit)}` : "No time limit";
     $("#student-timer").textContent = question.timeLimit ? formatSeconds(question.timeLimit) : "";
-    $("#student-answer-feedback").textContent = "";
+    $("#student-answer-feedback").textContent = "Choose an answer to stop the timer, then press Next.";
     $("#student-answer-feedback").className = "modal-answer-feedback";
     $("#student-submit-answer").disabled = true;
-    $("#student-submit-answer").dataset.advance = "false";
-    $("#student-submit-answer").textContent = "Submit answer";
+    $("#student-submit-answer").textContent = "Select an answer";
 
     if (["choice", "multi", "truefalse"].includes(question.type)) {
       if (question.type === "multi") {
         const hint = document.createElement("p");
         hint.className = "choice-select-hint";
-        hint.textContent = "Select every answer that applies, then submit.";
+        hint.textContent = "The timer stops after your first selection. Select all that apply, then press Next.";
         host.append(hint);
       }
       const choices = question.type === "truefalse" ? ["True", "False"] : question.choices;
@@ -868,7 +935,15 @@ function startQuickfire() {
             choiceSelection = new Set([index]);
             $$(".student-answer-option", host).forEach((other) => other.classList.toggle("is-selected", other === button));
           }
-          $("#student-submit-answer").disabled = choiceSelection.size === 0;
+          if (choiceSelection.size) {
+            stopStudentTimer();
+            $("#student-time-text").textContent = "Timer paused";
+          }
+          const next = $("#student-submit-answer");
+          next.disabled = choiceSelection.size === 0;
+          next.innerHTML = activeQuestionIndex === activeQuiz.questions.length - 1
+            ? 'Finish test <span aria-hidden="true">→</span>'
+            : 'Next <span aria-hidden="true">→</span>';
         });
         host.append(button);
       });
@@ -892,6 +967,10 @@ function startQuickfire() {
       $("#student-timer").textContent = formatSeconds(Math.ceil(remaining / 1000));
       if (remaining <= 0) {
         stopStudentTimer();
+        $("#student-time-text").textContent = "Time is up";
+        currentQuestionTimedOut = true;
+        $$(".student-answer-option").forEach((button) => { button.disabled = true; });
+        $("#student-submit-answer").textContent = "Saving…";
         submitCurrentAnswer(true).catch((error) => {
           answerSubmitted = false;
           setMessage($("#student-answer-feedback"), explainError(error), true);
@@ -935,46 +1014,32 @@ function startQuickfire() {
         maxMarks: question.marks,
         submittedAt: serverTimestamp(),
       });
+      currentAnswerSaved = true;
       currentAnswers.push({ questionId: question.id, answer });
       const feedback = $("#student-answer-feedback");
-      feedback.textContent = "Answer saved. Finish the test to see your automatic result.";
-      feedback.className = "modal-answer-feedback is-pending";
-      $$(".student-answer-option").forEach((button) => { button.disabled = true; });
-      const next = $("#student-submit-answer");
-      next.disabled = false;
-      next.innerHTML = activeQuestionIndex === activeQuiz.questions.length - 1 ? 'Finish test <span aria-hidden="true">→</span>' : 'Continue <span aria-hidden="true">→</span>';
-      next.dataset.advance = "true";
+      feedback.textContent = "";
+      feedback.className = "modal-answer-feedback";
+      if (activeQuestionIndex < activeQuiz.questions.length - 1) {
+        activeQuestionIndex += 1;
+        renderStudentQuestion(Date.now());
+      } else {
+        await finishStudentAttempt();
+      }
     } catch (error) {
       answerSubmitted = false;
       const submit = $("#student-submit-answer");
-      submit.dataset.advance = "false";
       submit.disabled = false;
+      if (timedOut) submit.textContent = "Retry save";
       setMessage($("#student-answer-feedback"), explainError(error), true);
     }
   }
 
   $("#student-submit-answer").addEventListener("click", async () => {
-    const button = $("#student-submit-answer");
-    if (button.dataset.advance === "true") {
-      button.dataset.advance = "false";
-      if (activeQuestionIndex < activeQuiz.questions.length - 1) {
-        const nextIndex = activeQuestionIndex + 1;
-        button.disabled = true;
-        setMessage($("#student-answer-feedback"), "Loading next question…");
-        try {
-          activeQuestionIndex = nextIndex;
-          renderStudentQuestion(Date.now());
-        } catch (error) {
-          button.disabled = false;
-          button.dataset.advance = "true";
-          setMessage($("#student-answer-feedback"), explainError(error), true);
-        }
-      } else {
-        await finishStudentAttempt();
-      }
-      return;
+    if (currentAnswerSaved && activeQuestionIndex === activeQuiz.questions.length - 1) {
+      await finishStudentAttempt();
+    } else {
+      await submitCurrentAnswer(currentQuestionTimedOut);
     }
-    await submitCurrentAnswer();
   });
 
   async function finishStudentAttempt() {
@@ -1025,8 +1090,7 @@ function startQuickfire() {
       } else {
         const submit = $("#student-submit-answer");
         submit.disabled = false;
-        submit.dataset.advance = "true";
-        submit.innerHTML = 'Finish test <span aria-hidden="true">→</span>';
+        submit.textContent = "Retry finish";
         setMessage($("#student-answer-feedback"), explainError(error), true);
         $("#student-result-retry").disabled = false;
       }

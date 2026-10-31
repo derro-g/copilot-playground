@@ -5,17 +5,17 @@ Quickfire is a static GitHub Pages quiz site backed by Firebase Authentication a
 ## Spark-plan behavior
 
 - Teachers sign in with Email/Password and must have an administrator-created `teacherUsers/{uid}` document.
-- Students use Firebase Anonymous Authentication and join with a 12-character code.
+- Students use Firebase Anonymous Authentication and join with a 6-character code. Existing 12-character codes continue to work.
 - The browser writes quiz sessions and answers directly to Firestore. Choice, select-all, and true/false questions are automatically graded in the browser when the student finishes; teachers can also see scores and export them as CSV.
 - Student clients can read individual answer-key documents after setting their attempt to submitted. Because the grading code and Firebase access run in the student's browser, a determined student can inspect the keys or bypass the intended timing. This is a convenience for low-stakes practice, not secure assessment. Do not use it for high-stakes or proctored tests.
 - The question timer is only displayed in the student's browser. Without a trusted server, students can bypass it. Do not use this version for high-stakes or proctored tests.
-- 12-character codes reduce guessing risk, but direct client access has no server-side rate limiting.
+- Short codes are easier to share but are not a security boundary: Firebase has no server-side rate limiting in this project, so close sessions when they are no longer in use.
 
 ## Firestore structure
 
 - `teacherUsers/{uid}`: administrator-managed teacher allowlist. The app cannot grant teacher access.
 - `tests/{testId}` and `tests/{testId}/questions/{questionId}`: teacher-owned reusable tests and their answer keys.
-- `sessionCodes/{code}`: 12-character code-to-session mapping. Students may get a single code document but cannot list codes.
+- `sessionCodes/{code}`: 6-character code-to-session mapping (older sessions may still use 12 characters). Students may get a single code document but cannot list codes.
 - `sessions/{sessionId}`: session metadata, owner, status, and maximum marks.
 - `sessions/{sessionId}/publicQuestions/{questionId}`: prompts/options available to signed-in anonymous students while the session is open.
 - `sessions/{sessionId}/answerKeys/{questionId}`: answer-key snapshots readable by the teacher and individually fetchable by that student's client after submission. These are not secret from students.
@@ -42,7 +42,7 @@ The rules in `firestore.rules` enforce these access boundaries. Never leave the 
    ```
 
    GitHub Pages will redeploy from `main`. No Functions deployment, Node.js install, or frontend build is needed.
-9. Open [the deployed site](https://derro-g.github.io/copilot-playground/), sign in as the teacher, create a test, and open a session. Use its 12-character code in a separate private/incognito window to verify the student flow.
+9. Open [the deployed site](https://derro-g.github.io/copilot-playground/), sign in as the teacher, create a test, and open a session. Use its 6-character code in a separate private/incognito window to verify the student flow.
 
 If Firestore reports a missing index for a teacher query, follow the error's link in the browser to create the requested index in the Firebase Console.
 

@@ -19,8 +19,15 @@
 .secure-message.is-error { color: #a74438; }
 .teacher-workspace { padding-top: 4px; }
 .teacher-cloud-layout { display: grid; grid-template-columns: minmax(280px, .86fr) minmax(360px, 1.14fr); align-items: start; gap: 15px; }
-.session-panel, .session-results-panel { grid-column: 1 / -1; }
+.teacher-cloud-layout > .question-builder-panel, .session-panel, .session-results-panel { grid-column: 1 / -1; }
 .teacher-cloud-layout > .builder-panel, .teacher-cloud-layout > .question-list-panel, .teacher-cloud-layout > .session-panel, .teacher-cloud-layout > .session-results-panel { min-width: 0; }
+.question-builder-layout { display: grid; grid-template-columns: minmax(0, .9fr) minmax(360px, 1.1fr); align-items: start; gap: 18px; }
+.question-overview { min-width: 0; }
+.question-overview > .section-heading { align-items: center; margin: 0 0 8px; }
+.question-overview h3 { margin: 0; font-family: "Space Grotesk", sans-serif; font-size: 1rem; }
+.question-editor-form { min-width: 0; }
+.question-builder-actions { justify-content: space-between; }
+.question-builder-actions button { flex: 1; }
 .cloud-form { padding: 15px; border: 1px solid var(--line); border-radius: 6px; background: rgba(255,255,255,.64); }
 .cloud-form h3 { margin: 0 0 3px; font-family: "Space Grotesk", sans-serif; font-size: 1rem; }
 .cloud-form textarea { resize: vertical; line-height: 1.5; }
@@ -84,6 +91,7 @@
 .answer-review-cell { min-width: 180px; white-space: pre-wrap; }
 @media (max-width: 760px) {
   .teacher-cloud-layout { grid-template-columns: 1fr; }
+  .question-builder-layout { grid-template-columns: 1fr; }
   .teacher-cloud-layout > .session-panel, .teacher-cloud-layout > .session-results-panel { grid-column: auto; }
   .secure-heading { grid-template-columns: 1fr; }
   .secure-heading .student-aside { display: none; }

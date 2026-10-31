@@ -40,7 +40,8 @@ service cloud.firestore {
     }
 
     function validCode(code) {
-      return code.matches('^[A-HJ-NP-Z2-9]{12}$');
+      return code.matches('^[A-HJ-NP-Z2-9]{6}$')
+        || code.matches('^[A-HJ-NP-Z2-9]{12}$');
     }
 
     function validStudentAnswer(question, answer) {

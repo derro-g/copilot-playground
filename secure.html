@@ -33,8 +33,8 @@
           <p class="section-kicker">JOIN A SESSION</p>
           <h2 id="join-panel-title">Your test starts here</h2>
           <form id="student-join-form">
-            <label for="student-code">12-character test code</label>
-            <input id="student-code" name="code" type="text" inputmode="text" autocomplete="off" autocapitalize="characters" maxlength="12" pattern="[A-HJ-NP-Z2-9]{12}" placeholder="ABC234DEF567" required />
+            <label for="student-code">6-character test code</label>
+            <input id="student-code" name="code" type="text" inputmode="text" autocomplete="off" autocapitalize="characters" maxlength="12" pattern="(?:[A-HJ-NP-Z2-9]{6}|[A-HJ-NP-Z2-9]{12})" placeholder="ABC234" required />
             <label for="student-display-name">Your name</label>
             <input id="student-display-name" name="name" type="text" maxlength="60" autocomplete="name" placeholder="First and last name" required />
             <p class="secure-message" id="student-join-message" role="status" aria-live="polite"></p>
@@ -68,24 +68,29 @@
             <p class="secure-message" id="teacher-message" role="status" aria-live="polite"></p>
           </section>
 
-          <section class="question-list-panel" aria-labelledby="question-editor-title">
-            <div class="section-heading"><div><p class="section-kicker">SELECTED TEST</p><h2 id="question-editor-title">Questions</h2></div><span class="quiz-count" id="selected-test-total"></span></div>
+          <section class="question-list-panel question-builder-panel" aria-labelledby="question-editor-title">
+            <div class="section-heading"><div><p class="section-kicker">TEST BUILDER</p><h2 id="question-editor-title">Questions</h2></div><span class="quiz-count" id="selected-test-total"></span></div>
             <p class="empty-state" id="select-test-message">Choose or create a test to edit its questions.</p>
-            <div id="test-question-list" class="teacher-question-list"></div>
-            <form id="cloud-question-form" class="cloud-form" hidden>
-              <h3 id="question-form-heading">Add a question</h3>
-              <label for="question-prompt">Question</label>
-              <textarea id="question-prompt" rows="3" maxlength="1000" required></textarea>
-              <div class="form-two-column">
-                <div><label for="question-type">Answer type</label><select id="question-type"><option value="choice">Multiple choice</option><option value="multi">Select all that apply</option><option value="truefalse">True or false</option></select></div>
-                <div><label for="question-marks">Marks</label><select id="question-marks"><option value="2">2 marks</option><option value="5">5 marks</option><option value="10">10 marks</option></select></div>
-              </div>
-              <label for="question-time">Time limit</label><select id="question-time"><option value="15">15 seconds</option><option value="30">30 seconds</option><option value="60">1 minute</option><option value="90">1 minute 30 seconds</option><option value="120">2 minutes</option></select>
-              <div id="question-type-editor"></div>
-              <p class="secure-message" id="question-editor-message" role="status"></p>
-              <div class="inline-form-row"><button class="primary-button" id="save-question-button" type="submit">Add question</button><button class="secondary-button" id="cancel-question-edit" type="button" hidden>Cancel edit</button></div>
-            </form>
-            <button class="secondary-button add-cloud-question" id="add-question-button" type="button" hidden>Add question</button>
+            <div class="question-builder-layout">
+              <section class="question-overview" aria-label="Question overview">
+                <div class="section-heading"><h3>Question overview</h3><button class="secondary-button add-cloud-question" id="add-question-button" type="button" hidden>Add question</button></div>
+                <p class="empty-state" id="question-overview-empty">Questions you add will appear here.</p>
+                <div id="test-question-list" class="teacher-question-list"></div>
+              </section>
+              <form id="cloud-question-form" class="cloud-form question-editor-form" hidden>
+                <h3 id="question-form-heading">Add a question</h3>
+                <label for="question-prompt">Question</label>
+                <textarea id="question-prompt" rows="3" maxlength="1000" required></textarea>
+                <div class="form-two-column">
+                  <div><label for="question-type">Answer type</label><select id="question-type"><option value="choice">Multiple choice</option><option value="multi">Select all that apply</option><option value="truefalse">True or false</option></select></div>
+                  <div><label for="question-marks">Marks</label><select id="question-marks"><option value="2">2 marks</option><option value="5">5 marks</option><option value="10">10 marks</option></select></div>
+                </div>
+                <label for="question-time">Time limit</label><select id="question-time"><option value="15">15 seconds</option><option value="30">30 seconds</option><option value="60">1 minute</option><option value="90">1 minute 30 seconds</option><option value="120">2 minutes</option></select>
+                <div id="question-type-editor"></div>
+                <p class="secure-message" id="question-editor-message" role="status"></p>
+                <div class="inline-form-row question-builder-actions"><button class="primary-button" id="save-question-button" type="submit">Add question</button><button class="secondary-button" id="finish-test-button" type="button">Finish / save test</button></div>
+              </form>
+            </div>
           </section>
 
           <section class="question-list-panel session-panel" aria-labelledby="sessions-title">
