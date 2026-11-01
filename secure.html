@@ -52,7 +52,7 @@
 
         <div class="teacher-cloud-layout">
           <section class="builder-panel" aria-labelledby="tests-title">
-            <div class="section-heading"><div><p class="section-kicker">REUSABLE QUESTION SETS</p><h2 id="tests-title">Tests</h2></div><div class="cloud-heading-actions"><button class="small-button secondary-small" id="create-sample-test" type="button">Add sample</button><button class="small-button" id="new-test-button" type="button">New test</button></div></div>
+            <div class="section-heading"><div><p class="section-kicker">REUSABLE QUESTION SETS</p><h2 id="tests-title">Tests</h2></div><div class="cloud-heading-actions"><button class="small-button" id="new-test-button" type="button">New test</button></div></div>
             <form id="test-settings-form" class="cloud-form" hidden>
               <label for="test-title-input">Test title</label>
               <input id="test-title-input" maxlength="100" placeholder="e.g. Biology: cells" required />
@@ -77,19 +77,6 @@
                 <p class="empty-state" id="question-overview-empty">Questions you add will appear here.</p>
                 <div id="test-question-list" class="teacher-question-list"></div>
               </section>
-              <form id="cloud-question-form" class="cloud-form question-editor-form" hidden>
-                <h3 id="question-form-heading">Add a question</h3>
-                <label for="question-prompt">Question</label>
-                <textarea id="question-prompt" rows="3" maxlength="1000" required></textarea>
-                <div class="form-two-column">
-                  <div><label for="question-type">Answer type</label><select id="question-type"><option value="choice">Multiple choice</option><option value="multi">Select all that apply</option><option value="truefalse">True or false</option></select></div>
-                  <div><label for="question-marks">Marks</label><select id="question-marks"><option value="2">2 marks</option><option value="5">5 marks</option><option value="10">10 marks</option></select></div>
-                </div>
-                <label for="question-time">Time limit</label><select id="question-time"><option value="15">15 seconds</option><option value="30">30 seconds</option><option value="60">1 minute</option><option value="90">1 minute 30 seconds</option><option value="120">2 minutes</option></select>
-                <div id="question-type-editor"></div>
-                <p class="secure-message" id="question-editor-message" role="status"></p>
-                <div class="inline-form-row question-builder-actions"><button class="primary-button" id="save-question-button" type="submit">Add question</button><button class="secondary-button" id="finish-test-button" type="button">Finish / save test</button></div>
-              </form>
             </div>
           </section>
 
@@ -103,20 +90,31 @@
             <p class="empty-state" id="no-sessions-message">Sessions you create will appear here.</p>
           </section>
 
-          <section class="review-panel session-results-panel" id="session-results-panel" hidden aria-labelledby="session-results-title">
-            <div class="section-heading"><div><p class="section-kicker">SESSION RESULTS</p><h2 id="session-results-title">Students</h2></div><button class="small-button" id="export-csv-button" type="button">Export CSV</button></div>
-            <div class="attempt-table-wrap"><table class="attempt-table"><thead><tr><th>Student</th><th>Score</th><th>Status</th><th>Submitted</th><th>Answers and automatic marks</th></tr></thead><tbody id="session-attempts-body"></tbody></table></div>
-            <p class="empty-state" id="no-attempts-message">No students have joined this session yet.</p>
-          </section>
         </div>
       </section>
     </main>
+
+    <dialog class="question-editor-dialog" id="question-editor-dialog" aria-labelledby="question-form-heading">
+      <form id="cloud-question-form" class="cloud-form question-editor-form">
+        <div class="section-heading"><div><p class="section-kicker">TEST BUILDER</p><h2 id="question-form-heading">Add a question</h2></div><button class="icon-button" id="close-question-editor" type="button" aria-label="Close question editor">×</button></div>
+        <label for="question-prompt">Question</label>
+        <textarea id="question-prompt" rows="3" maxlength="1000" required></textarea>
+        <div class="form-two-column">
+          <div><label for="question-type">Answer type</label><select id="question-type"><option value="choice">Multiple choice</option><option value="multi">Select all that apply</option><option value="truefalse">True or false</option></select></div>
+          <div><label for="question-marks">Marks</label><select id="question-marks"><option value="2">2 marks</option><option value="5">5 marks</option><option value="10">10 marks</option></select></div>
+        </div>
+        <label for="question-time">Time limit</label><select id="question-time"><option value="15">15 seconds</option><option value="30">30 seconds</option><option value="60">1 minute</option><option value="90">1 minute 30 seconds</option><option value="120">2 minutes</option></select>
+        <div id="question-type-editor"></div>
+        <p class="secure-message" id="question-editor-message" role="status"></p>
+        <div class="inline-form-row question-builder-actions"><button class="primary-button" id="save-question-button" type="submit">Add question</button><button class="secondary-button" id="finish-test-button" type="button">Finish / save test</button></div>
+      </form>
+    </dialog>
 
     <dialog class="quiz-modal" id="student-quiz-dialog">
       <div class="modal-shell">
         <div class="modal-topbar"><div><p class="section-kicker" id="active-session-code"></p><h2 id="active-session-title"></h2></div><button class="icon-button" id="exit-session" type="button" aria-label="Leave test">×</button></div>
         <section id="student-question-screen"><div class="modal-progress-row"><span id="student-question-count"></span><span class="modal-points" id="student-question-marks"></span></div><div class="modal-progress-track"><span id="student-question-progress"></span></div><div class="modal-timer-row" id="student-timer-row"><span id="student-time-text"></span><strong id="student-timer"></strong></div><div class="modal-question-copy"><p class="question-kicker" id="student-question-type"></p><h1 id="student-question-prompt"></h1></div><div id="student-answer-controls" class="modal-answer-grid"></div><p id="student-answer-feedback" class="modal-answer-feedback" aria-live="polite"></p><div class="student-next-row"><button class="primary-button" id="student-submit-answer" type="button" disabled>Submit answer <span aria-hidden="true">→</span></button></div></section>
-        <section id="student-result-screen" hidden><p class="eyebrow"><span class="eyebrow-dot"></span> TEST COMPLETE</p><h1>Your result,<br /><em>saved.</em></h1><p id="student-result-summary" class="intro-description"></p><p id="student-result-error" class="secure-message" role="status" aria-live="polite"></p><button class="secondary-button" id="student-result-retry" type="button" hidden>Load result</button><div id="student-end-feedback" class="end-feedback-list" hidden></div><button class="primary-button" id="student-done-button" type="button">Done <span aria-hidden="true">→</span></button></section>
+        <section id="student-result-screen" hidden><p class="eyebrow"><span class="eyebrow-dot"></span> TEST COMPLETE</p><h1 class="student-result-score" id="student-result-score">—</h1><p id="student-result-summary" class="intro-description">Your total marks</p><p id="student-result-error" class="secure-message" role="status" aria-live="polite"></p><button class="secondary-button" id="student-result-retry" type="button" hidden>Load result</button><div id="student-end-feedback" class="end-feedback-list" hidden></div><button class="primary-button" id="student-done-button" type="button">Done <span aria-hidden="true">→</span></button></section>
       </div>
     </dialog>
 

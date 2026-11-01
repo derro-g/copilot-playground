@@ -90,9 +90,12 @@ function startQuickfire() {
   let selectedQuestions = [];
   let editingQuestionId = null;
   let selectedSession = null;
+  let loadedSessions = [];
+  let resultsOpenSessionId = null;
   let activeQuiz = null;
   let activeQuestionIndex = 0;
   let activeAttemptId = null;
+  let currentResultSessionId = null;
   let timerId = null;
   let answerSubmitted = false;
   let currentAnswerSaved = false;
@@ -100,7 +103,9 @@ function startQuickfire() {
   let choiceSelection = new Set();
   let currentAnswers = [];
   let testDraftId = null;
-  let questionBuilderFinished = false;
+  let questionEditorChoices = [];
+  let questionEditorCorrect = new Set();
+  let questionEditorType = "choice";
   let attemptSubmitted = false;
   let sessionListUnsubscribe = null;
   const sessionAttemptUnsubscribers = new Map();
@@ -109,6 +114,7 @@ function startQuickfire() {
 
   const teacherLoginDialog = $("#teacher-login-dialog");
   const studentQuizDialog = $("#student-quiz-dialog");
+  const questionEditorDialog = $("#question-editor-dialog");
 
   function setMessage(element, text, isError = false) {
     element.textContent = text || "";
@@ -202,26 +208,100 @@ function startQuickfire() {
     const type = $("#question-type").value;
     const host = $("#question-type-editor");
     host.replaceChildren();
-    const addTextarea = (id, labelText, value = "", placeholder = "") => {
-      const label = document.createElement("label");
-      label.htmlFor = id;
-      label.textContent = labelText;
-      const textarea = document.createElement("textarea");
-      textarea.id = id;
-      textarea.rows = 3;
-      textarea.maxLength = 2000;
-      textarea.value = value;
-      textarea.placeholder = placeholder;
-      host.append(label, textarea);
-      return textarea;
-    };
+    if (question) {
+      questionEditorChoices = [...(question.choices || [])];
+      questionEditorCorrect = new Set(question.correctIndices || []);
+    } else if (type === "truefalse") {
+      questionEditorChoices = ["True", "False"];
+      questionEditorCorrect.clear();
+    } else if (questionEditorType === "truefalse") {
+      questionEditorChoices = ["", "", "", ""];
+      questionEditorCorrect.clear();
+    } else if (questionEditorChoices.length < 2) {
+      questionEditorChoices = ["", "", "", ""];
+      questionEditorCorrect.clear();
+    }
 
-    if (["choice", "multi", "truefalse"].includes(type)) {
-      const choices = type === "truefalse" ? ["True", "False"] : (question?.choices || []);
-      addTextarea("type-choice-list", "Answer choices (one per line)", choices.join("\n"), "Option A\nOption B\nOption C\nOption D");
-      const correct = question?.correctIndices || (Number.isInteger(question?.correctIndex) ? [question.correctIndex] : []);
-      addTextarea("type-correct-indices", type === "multi" ? "Correct options (letters, comma separated)" : "Correct option (letter)", correct.map((index) => String.fromCharCode(65 + index)).join(","), type === "multi" ? "A,C" : "B");
-      if (type === "truefalse") $("#type-choice-list").readOnly = true;
+    questionEditorType = type;
+    if (type === "truefalse") questionEditorChoices = ["True", "False"];
+    if (questionEditorChoices.length < 2) questionEditorChoices = ["", ""];
+    if (type !== "multi" && questionEditorCorrect.size > 1) {
+      questionEditorCorrect = new Set([questionEditorCorrect.values().next().value]);
+    }
+
+    const help = document.createElement("p");
+    help.className = "cloud-type-help";
+    help.textContent = type === "multi"
+      ? "Select every correct answer. Students will choose the same boxes."
+      : "Mark one correct answer. Students will choose one box.";
+    host.append(help);
+
+    questionEditorChoices.forEach((choice, index) => {
+      const row = document.createElement("div");
+      row.className = "question-choice-editor-row";
+      const letter = document.createElement("span");
+      letter.className = "question-choice-letter";
+      letter.textContent = String.fromCharCode(65 + index);
+      const input = document.createElement("input");
+      input.className = "question-choice-input";
+      input.type = "text";
+      input.maxLength = 200;
+      input.value = choice;
+      input.disabled = type === "truefalse";
+      input.placeholder = `Answer ${String.fromCharCode(65 + index)}`;
+      input.setAttribute("aria-label", `Answer ${String.fromCharCode(65 + index)}`);
+      input.addEventListener("input", () => { questionEditorChoices[index] = input.value; });
+      const correctLabel = document.createElement("label");
+      correctLabel.className = "question-choice-correct";
+      const correct = document.createElement("input");
+      correct.type = type === "multi" ? "checkbox" : "radio";
+      correct.name = "question-correct-answer";
+      correct.checked = questionEditorCorrect.has(index);
+      correct.setAttribute("aria-label", `Mark answer ${String.fromCharCode(65 + index)} correct`);
+      correct.addEventListener("change", () => {
+        if (type !== "multi") questionEditorCorrect.clear();
+        if (correct.checked) questionEditorCorrect.add(index);
+        else questionEditorCorrect.delete(index);
+        if (type !== "multi") {
+          $$(".question-choice-correct input", host).forEach((choiceInput) => {
+            choiceInput.checked = choiceInput === correct;
+          });
+        }
+      });
+      correctLabel.append(correct, document.createTextNode("Correct"));
+      row.append(letter, input, correctLabel);
+
+      if (type !== "truefalse") {
+        const remove = document.createElement("button");
+        remove.className = "question-choice-remove";
+        remove.type = "button";
+        remove.textContent = "×";
+        remove.setAttribute("aria-label", `Remove answer ${String.fromCharCode(65 + index)}`);
+        remove.disabled = questionEditorChoices.length <= 2;
+        remove.addEventListener("click", () => {
+          questionEditorChoices.splice(index, 1);
+          questionEditorCorrect = new Set([...questionEditorCorrect]
+            .filter((correctIndex) => correctIndex !== index)
+            .map((correctIndex) => correctIndex > index ? correctIndex - 1 : correctIndex));
+          renderTypeEditor();
+        });
+        row.append(remove);
+      }
+      host.append(row);
+    });
+
+    if (type !== "truefalse") {
+      const addChoice = document.createElement("button");
+      addChoice.className = "secondary-button question-choice-add";
+      addChoice.type = "button";
+      addChoice.textContent = "Add answer choice";
+      addChoice.disabled = questionEditorChoices.length >= 20;
+      addChoice.addEventListener("click", () => {
+        questionEditorChoices.push("");
+        renderTypeEditor();
+        $$(".question-choice-input", host).at(-1)?.focus();
+      });
+      host.append(addChoice);
     }
   }
 
@@ -232,6 +312,9 @@ function startQuickfire() {
     $("#save-question-button").textContent = "Add question";
     $("#question-marks").value = "2";
     $("#question-time").value = "30";
+    questionEditorChoices = ["", "", "", ""];
+    questionEditorCorrect = new Set();
+    questionEditorType = $("#question-type").value;
     renderTypeEditor();
   }
 
@@ -247,8 +330,7 @@ function startQuickfire() {
     const hasSelectedTest = Boolean(selectedTest || testDraftId);
     $("#select-test-message").hidden = hasSelectedTest;
     $("#select-test-message").textContent = "Choose or create a test to edit its questions.";
-    $("#cloud-question-form").hidden = !hasSelectedTest || questionBuilderFinished;
-    $("#add-question-button").hidden = !selectedTest || !questionBuilderFinished;
+    $("#add-question-button").hidden = !hasSelectedTest;
     $("#test-question-list").hidden = !hasSelectedTest;
     $("#question-overview-empty").hidden = selectedQuestions.length > 0;
 
@@ -341,7 +423,6 @@ function startQuickfire() {
     const questionQuery = query(collection(db, "tests", testId, "questions"), orderBy("order"));
     const questionSnapshot = await getDocs(questionQuery);
     selectedQuestions = questionSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
-    questionBuilderFinished = false;
     $("#test-settings-form").hidden = false;
     $("#test-title-input").value = test.title;
     $("#test-speed-bonus").checked = false;
@@ -355,64 +436,18 @@ function startQuickfire() {
     selectedTest = null;
     selectedQuestions = [];
     testDraftId = newId(collection(db, "tests"));
-    questionBuilderFinished = false;
     $("#test-settings-form").hidden = false;
     $("#test-title-input").value = "";
     $("#test-speed-bonus").checked = false;
     $("#test-no-time-limit").checked = false;
     clearQuestionEditor();
-    $("#cloud-question-form").hidden = false;
     renderQuestions();
-  });
-
-  $("#create-sample-test").addEventListener("click", async () => {
-    if (!teacherUid) return;
-    try {
-      const testId = `sample-auto-${teacherUid}`;
-      const testRef = doc(db, "tests", testId);
-      if (!(await getDoc(testRef)).exists()) {
-        const samples = [
-          { prompt: "Which type of graphic is made from scalable paths and shapes?", type: "choice", choices: ["Raster", "Vector", "Bitmap only", "Photographic"], correctIndices: [1] },
-          { prompt: "Which file format commonly supports transparent backgrounds?", type: "choice", choices: ["JPG", "BMP", "PNG", "TXT"], correctIndices: [2] },
-          { prompt: "Which tool is typically used to select and move individual anchor points in vector artwork?", type: "choice", choices: ["Direct Selection", "Paint Bucket", "Crop", "Blur"], correctIndices: [0] },
-          { prompt: "Which are common reasons to use a layer in a graphics application? Select all that apply.", type: "multi", choices: ["Edit elements independently", "Reorder artwork", "Increase monitor brightness", "Hide an element without deleting it"], correctIndices: [0, 1, 3] },
-          { prompt: "A raster image is composed of pixels.", type: "truefalse", choices: ["True", "False"], correctIndices: [0] },
-          { prompt: "Which color model is generally used for material prepared for print?", type: "choice", choices: ["RGB", "CMYK", "HSL only", "Hexadecimal only"], correctIndices: [1] },
-        ];
-        const batch = writeBatch(db);
-        batch.set(testRef, {
-          ownerUid: teacherUid,
-          title: "Computer applications and graphics sampler",
-          feedbackMode: "end",
-          speedBonus: false,
-          noTimeLimit: true,
-          questionCount: samples.length,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-        samples.forEach((question, order) => {
-          batch.set(doc(db, "tests", testId, "questions", `sample-${order + 1}`), {
-            ...question,
-            order,
-            marks: 5,
-            timeLimit: 120,
-          });
-        });
-        await batch.commit();
-      }
-      await loadTests();
-      await selectTest(testId);
-      setMessage($("#teacher-message"), "Sample test is ready. Students will see their score when they finish.");
-    } catch (error) {
-      setMessage($("#teacher-message"), explainError(error), true);
-    }
   });
 
   $("#cancel-test-edit").addEventListener("click", () => {
     testDraftId = null;
     selectedTest = null;
     selectedQuestions = [];
-    questionBuilderFinished = false;
     $("#test-settings-form").hidden = true;
     clearQuestionEditor();
     renderQuestions();
@@ -454,27 +489,24 @@ function startQuickfire() {
   $("#test-settings-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
+      const creatingTest = Boolean(testDraftId);
       await saveTestSettings();
       setMessage($("#teacher-message"), "Test saved.");
       renderQuestions();
+      if (creatingTest) openNewQuestionEditor();
     } catch (error) {
       setMessage($("#teacher-message"), explainError(error), true);
     }
   });
 
   $("#finish-test-button").addEventListener("click", async () => {
-    if (!selectedQuestions.length) {
-      setMessage($("#question-editor-message"), "Add at least one question before finishing this test.", true);
-      return;
-    }
-    if (editingQuestionId || $("#question-prompt").value.trim()) {
-      setMessage($("#question-editor-message"), "Add or save the question you are editing before finishing the test.", true);
-      return;
-    }
     try {
+      if ($("#question-prompt").value.trim()) await saveCurrentQuestion();
+      else if (editingQuestionId) throw new Error("Enter the question text before finishing the test.");
+      if (!selectedQuestions.length) throw new Error("Add at least one question before finishing this test.");
       await saveTestSettings();
-      questionBuilderFinished = true;
       renderQuestions();
+      questionEditorDialog.close();
       setMessage($("#teacher-message"), "Test saved and ready to use.");
     } catch (error) {
       setMessage($("#question-editor-message"), explainError(error), true);
@@ -482,13 +514,21 @@ function startQuickfire() {
   });
 
   $("#question-type").addEventListener("change", () => renderTypeEditor());
-  $("#add-question-button").addEventListener("click", () => {
+  function openNewQuestionEditor() {
     editingQuestionId = null;
     $("#question-form-heading").textContent = "Add a question";
     $("#save-question-button").textContent = "Add question";
-    questionBuilderFinished = false;
     clearQuestionEditor();
-    renderQuestions();
+    setMessage($("#question-editor-message"), "");
+    questionEditorDialog.showModal();
+  }
+
+  $("#add-question-button").addEventListener("click", openNewQuestionEditor);
+
+  $("#close-question-editor").addEventListener("click", () => questionEditorDialog.close());
+
+  questionEditorDialog.addEventListener("close", () => {
+    if (!$("#question-prompt").value.trim()) clearQuestionEditor();
   });
 
   function editQuestion(question) {
@@ -497,7 +537,6 @@ function startQuickfire() {
       return;
     }
     editingQuestionId = question.id;
-    questionBuilderFinished = false;
     $("#question-prompt").value = question.prompt || "";
     $("#question-type").value = question.type || "choice";
     $("#question-marks").value = String(question.marks || 2);
@@ -506,7 +545,8 @@ function startQuickfire() {
     $("#save-question-button").textContent = "Save changes";
     renderQuestions();
     renderTypeEditor(question);
-    $("#cloud-question-form").scrollIntoView({ behavior: "smooth", block: "center" });
+    setMessage($("#question-editor-message"), "");
+    questionEditorDialog.showModal();
   }
 
   function collectQuestion() {
@@ -519,9 +559,12 @@ function startQuickfire() {
     };
     if (!question.prompt) throw new Error("Enter the question text.");
     if (!SUPPORTED_QUESTION_TYPES.includes(type)) throw new Error("Choose a supported automatic-marking question type.");
-    question.choices = type === "truefalse" ? ["True", "False"] : $("#type-choice-list").value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
-    const letters = $("#type-correct-indices").value.toUpperCase().split(/[\s,]+/).filter(Boolean);
-    question.correctIndices = [...new Set(letters.map((letter) => letter.charCodeAt(0) - 65))];
+    question.choices = type === "truefalse"
+      ? ["True", "False"]
+      : questionEditorChoices.map((value) => value.trim());
+    if (question.choices.some((choice) => !choice)) throw new Error("Fill in each answer box or remove the empty choice.");
+    question.correctIndices = [...questionEditorCorrect]
+      .filter((index) => index >= 0 && index < question.choices.length);
     if (type !== "truefalse" && question.choices.length < 2) throw new Error("Add at least two answer choices.");
     if (question.choices.length > 20) throw new Error("Use at most 20 answer choices.");
     if (question.correctIndices.some((index) => index < 0 || index >= question.choices.length)) throw new Error("Correct options must refer to choices in the list.");
@@ -530,33 +573,46 @@ function startQuickfire() {
     return question;
   }
 
+  async function saveCurrentQuestion() {
+    if (!selectedTest && !testDraftId) throw new Error("Save or create a test before adding questions.");
+    const question = collectQuestion();
+    await saveTestSettings();
+    const testId = selectedTest.id;
+    const questionCollection = collection(db, "tests", testId, "questions");
+    if (editingQuestionId) {
+      const oldQuestion = selectedQuestions.find((item) => item.id === editingQuestionId);
+      if (!oldQuestion) throw new Error("This question is no longer available. Reopen the test and try again.");
+      await updateDoc(doc(questionCollection, editingQuestionId), {
+        ...question,
+        order: oldQuestion.order,
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      const questionRef = doc(questionCollection);
+      await setDoc(questionRef, {
+        ...question,
+        order: selectedQuestions.length,
+        createdAt: serverTimestamp(),
+      });
+    }
+    selectedQuestions = await readQuestionDocs(testId);
+    await updateDoc(doc(db, "tests", testId), {
+      questionCount: selectedQuestions.length,
+      updatedAt: serverTimestamp(),
+    });
+    selectedTest = { ...selectedTest, questionCount: selectedQuestions.length };
+    await loadTests();
+    clearQuestionEditor();
+    renderQuestions();
+  }
+
   $("#cloud-question-form").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const message = $("#question-editor-message");
     try {
-      if (!selectedTest && !testDraftId) throw new Error("Save or create a test before adding questions.");
-      const question = collectQuestion();
-      await saveTestSettings();
-      const testId = selectedTest.id;
-      const questionCollection = collection(db, "tests", testId, "questions");
-      if (editingQuestionId) {
-        const oldQuestion = selectedQuestions.find((item) => item.id === editingQuestionId);
-        await updateDoc(doc(questionCollection, editingQuestionId), { ...question, order: oldQuestion.order, updatedAt: serverTimestamp() });
-      } else {
-        const questionRef = doc(questionCollection);
-        await setDoc(questionRef, { ...question, order: selectedQuestions.length, createdAt: serverTimestamp() });
-      }
-      selectedQuestions = await readQuestionDocs(testId);
-      clearQuestionEditor();
-      renderQuestions();
-      setMessage(message, "Question saved.");
-      if (selectedTest) {
-        await updateDoc(doc(db, "tests", testId), { questionCount: selectedQuestions.length, updatedAt: serverTimestamp() });
-        selectedTest = { ...selectedTest, questionCount: selectedQuestions.length };
-        await loadTests();
-      }
+      await saveCurrentQuestion();
+      setMessage($("#question-editor-message"), "Question saved. Add another, or finish and save the test.");
     } catch (error) {
-      setMessage(message, explainError(error), true);
+      setMessage($("#question-editor-message"), explainError(error), true);
     }
   });
 
@@ -704,7 +760,8 @@ function startQuickfire() {
     const sessionQuery = query(collection(db, "sessions"), where("ownerUid", "==", teacherUid), orderBy("createdAt", "desc"));
     if (sessionListUnsubscribe) sessionListUnsubscribe();
     sessionListUnsubscribe = onSnapshot(sessionQuery, (snapshot) => {
-      renderSessions(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
+      loadedSessions = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+      renderSessions(loadedSessions);
     }, (error) => setMessage($("#teacher-message"), explainError(error), true));
   }
 
@@ -775,11 +832,49 @@ function startQuickfire() {
       });
       const results = document.createElement("button");
       results.type = "button";
-      results.textContent = "Results";
-      results.addEventListener("click", () => loadSessionResults(session));
+      results.textContent = resultsOpenSessionId === session.id ? "Hide results" : "Results";
+      results.setAttribute("aria-expanded", String(resultsOpenSessionId === session.id));
+      results.addEventListener("click", () => {
+        resultsOpenSessionId = resultsOpenSessionId === session.id ? null : session.id;
+        if (resultsUnsubscribe) {
+          resultsUnsubscribe();
+          resultsUnsubscribe = null;
+        }
+        renderSessions(loadedSessions);
+      });
       actions.append(copyLink, copyCode, toggle, results);
       row.append(info, actions);
+      const resultsPanel = document.createElement("section");
+      resultsPanel.className = "review-panel session-results-panel";
+      resultsPanel.hidden = resultsOpenSessionId !== session.id;
+      resultsPanel.setAttribute("aria-label", `Results for ${session.title}`);
+      const resultsHeading = document.createElement("div");
+      resultsHeading.className = "section-heading";
+      const resultsTitle = document.createElement("h3");
+      resultsTitle.className = "session-results-title";
+      resultsTitle.textContent = `Students · ${session.title} (${session.joinCode})`;
+      const exportButton = document.createElement("button");
+      exportButton.className = "small-button export-csv-button";
+      exportButton.type = "button";
+      exportButton.textContent = "Export CSV";
+      exportButton.addEventListener("click", exportSessionCsv);
+      resultsHeading.append(resultsTitle, exportButton);
+      const tableWrap = document.createElement("div");
+      tableWrap.className = "attempt-table-wrap";
+      const table = document.createElement("table");
+      table.className = "attempt-table";
+      table.innerHTML = "<thead><tr><th>Student</th><th>Score</th><th>Status</th><th>Submitted</th><th>Answers and automatic marks</th></tr></thead>";
+      const body = document.createElement("tbody");
+      body.className = "session-attempts-body";
+      table.append(body);
+      tableWrap.append(table);
+      const empty = document.createElement("p");
+      empty.className = "empty-state no-attempts-message";
+      empty.textContent = "No students have joined this session yet.";
+      resultsPanel.append(resultsHeading, tableWrap, empty);
+      row.append(resultsPanel);
       host.append(row);
+      if (resultsOpenSessionId === session.id) loadSessionResults(session, resultsPanel);
       if (!sessionAttemptUnsubscribers.has(session.id)) {
         const unsubscribe = onSnapshot(
           collection(db, "sessions", session.id, "attempts"),
@@ -1063,7 +1158,8 @@ function startQuickfire() {
       stopStudentTimer();
       $("#student-question-screen").hidden = true;
       $("#student-result-screen").hidden = false;
-      $("#student-result-summary").textContent = "Calculating your score…";
+      $("#student-result-score").textContent = "…";
+      $("#student-result-summary").textContent = "Calculating your total marks";
       $("#student-result-error").textContent = "";
       $("#student-result-retry").hidden = true;
       const answersByQuestion = new Map(currentAnswers.map((item) => [item.questionId, item.answer]));
@@ -1075,7 +1171,8 @@ function startQuickfire() {
       }));
       const score = results.reduce((sum, result) => sum + result.score, 0);
       const correctCount = results.filter((result) => result.correct).length;
-      $("#student-result-summary").textContent = `${score} / ${activeQuiz.maxMarks} marks · ${correctCount} of ${results.length} correct.`;
+      $("#student-result-score").textContent = `${score} / ${activeQuiz.maxMarks}`;
+      $("#student-result-summary").textContent = `Your total marks · ${correctCount} of ${results.length} correct`;
       renderStudentEndFeedback(results);
       $("#student-result-retry").disabled = false;
     } catch (error) {
@@ -1083,6 +1180,7 @@ function startQuickfire() {
         stopStudentTimer();
         $("#student-question-screen").hidden = true;
         $("#student-result-screen").hidden = false;
+        $("#student-result-score").textContent = "—";
         $("#student-result-summary").textContent = "Your answers were submitted, but we couldn't calculate the score.";
         setMessage($("#student-result-error"), explainError(error), true);
         $("#student-result-retry").hidden = false;
@@ -1133,21 +1231,24 @@ function startQuickfire() {
   });
   studentQuizDialog.addEventListener("close", stopStudentTimer);
 
-  function loadSessionResults(session) {
+  function loadSessionResults(session, panel) {
     selectedSession = session;
-    $("#session-results-panel").hidden = false;
-    $("#session-results-title").textContent = `Students · ${session.title} (${session.joinCode})`;
-    const body = $("#session-attempts-body");
+    currentResultSessionId = session.id;
+    currentResultRows = [];
+    const body = $(".session-attempts-body", panel);
+    const emptyMessage = $(".no-attempts-message", panel);
     body.replaceChildren();
     if (resultsUnsubscribe) resultsUnsubscribe();
     const attemptsQuery = query(collection(db, "sessions", session.id, "attempts"), orderBy("createdAt"));
     resultsUnsubscribe = onSnapshot(attemptsQuery, async (attemptsSnapshot) => {
       try {
+        if (!panel.isConnected || resultsOpenSessionId !== session.id) return;
         body.replaceChildren();
         currentResultRows = [];
         for (const attemptDoc of attemptsSnapshot.docs) {
           const attempt = { id: attemptDoc.id, ...attemptDoc.data() };
           const responsesSnapshot = await getDocs(collection(db, "sessions", session.id, "attempts", attempt.id, "responses"));
+          if (!panel.isConnected || resultsOpenSessionId !== session.id) return;
           const responses = await Promise.all(responsesSnapshot.docs.map(async (item) => {
             const response = { id: item.id, ...item.data() };
             const answerKeySnapshot = await getDoc(doc(db, "sessions", session.id, "answerKeys", response.id));
@@ -1163,6 +1264,7 @@ function startQuickfire() {
                 : Number.isInteger(response.answer) ? choices[response.answer] || "" : "No answer",
             };
           }));
+          if (!panel.isConnected || resultsOpenSessionId !== session.id) return;
           currentResultRows.push({ attempt, responses });
           const row = document.createElement("tr");
           const name = document.createElement("td");
@@ -1189,32 +1291,36 @@ function startQuickfire() {
           row.append(name, score, status, submitted, answers);
           body.append(row);
         }
-        $("#no-attempts-message").hidden = currentResultRows.length > 0;
+        emptyMessage.hidden = currentResultRows.length > 0;
       } catch (error) {
         setMessage($("#teacher-message"), explainError(error), true);
       }
     }, (error) => setMessage($("#teacher-message"), explainError(error), true));
   }
 
-  $("#export-csv-button").addEventListener("click", () => {
-    if (!selectedSession) return;
+  function exportSessionCsv(event) {
+    const panel = event.currentTarget.closest(".session-results-panel");
+    const row = panel?.closest(".cloud-session-row");
+    const session = loadedSessions.find((item) => item.id === row?.dataset.sessionId);
+    if (!session) throw new Error("Could not find the session for this export.");
+    if (!selectedSession || currentResultSessionId !== session.id) return;
     const quote = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
     const lines = [["join_code", "student_name", "score", "max_marks", "status", "submitted_at", "answers"].map(quote).join(",")];
     currentResultRows.forEach(({ attempt, responses }) => {
       const answers = responses
         .map((response) => `${response.prompt}: ${response.answerLabel || "No answer"} (${response.score}/${response.maxMarks})`).join(" | ");
-      lines.push([selectedSession.joinCode, attempt.studentName,
-        responses.reduce((sum, response) => sum + (Number(response.score) || 0), 0), selectedSession.maxMarks, attempt.status,
+      lines.push([session.joinCode, attempt.studentName,
+        responses.reduce((sum, response) => sum + (Number(response.score) || 0), 0), session.maxMarks, attempt.status,
         attempt.submittedAt?.toDate ? attempt.submittedAt.toDate().toISOString() : "", answers].map(quote).join(","));
     });
     const blob = new Blob([lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `quickfire-${selectedSession.joinCode}-results.csv`;
+    link.download = `quickfire-${session.joinCode}-results.csv`;
     link.click();
     URL.revokeObjectURL(url);
-  });
+  }
 
   function parseLegacyTests() {
     try {
