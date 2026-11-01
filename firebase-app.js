@@ -328,9 +328,7 @@ function startQuickfire() {
     list.replaceChildren();
     $("#selected-test-total").textContent = selectedQuestions.length ? `${selectedQuestions.length} · ${selectedQuestions.reduce((sum, q) => sum + (Number(q.marks) || 0), 0)} marks` : "0 questions";
     const hasSelectedTest = Boolean(selectedTest || testDraftId);
-    $("#select-test-message").hidden = hasSelectedTest;
-    $("#select-test-message").textContent = "Choose or create a test to edit its questions.";
-    $("#add-question-button").hidden = !hasSelectedTest;
+    $("#open-question-builder-button").hidden = !hasSelectedTest;
     $("#test-question-list").hidden = !hasSelectedTest;
     $("#question-overview-empty").hidden = selectedQuestions.length > 0;
 
@@ -523,7 +521,7 @@ function startQuickfire() {
     questionEditorDialog.showModal();
   }
 
-  $("#add-question-button").addEventListener("click", openNewQuestionEditor);
+  $("#open-question-builder-button").addEventListener("click", openNewQuestionEditor);
 
   $("#close-question-editor").addEventListener("click", () => questionEditorDialog.close());
 

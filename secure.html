@@ -24,7 +24,7 @@
         <div class="workspace-heading secure-heading">
           <div>
             <p class="eyebrow"><span class="eyebrow-dot"></span> READY WHEN YOU ARE</p>
-            <h1 id="join-title">One code.<br /><em>One good test.</em></h1>
+            <h1 id="join-title">Join your test.</h1>
             <p class="intro-description">Enter the code your teacher shared, add your name, and take the test.</p>
           </div>
           <div class="student-aside" aria-hidden="true"><span>QF</span><strong>Take a breath.<br />Trust what you know.</strong><i>✳</i></div>
@@ -41,7 +41,6 @@
             <button class="primary-button join-button" id="join-session-button" type="submit">Join test <span aria-hidden="true">→</span></button>
           </form>
         </section>
-        <footer class="page-footer">Your result is calculated when you finish. Answer keys are accessible in the browser, so use this for low-stakes practice only.</footer>
       </section>
 
       <section class="workspace-screen teacher-workspace" id="teacher-side" hidden aria-labelledby="teacher-title">
@@ -52,7 +51,7 @@
 
         <div class="teacher-cloud-layout">
           <section class="builder-panel" aria-labelledby="tests-title">
-            <div class="section-heading"><div><p class="section-kicker">REUSABLE QUESTION SETS</p><h2 id="tests-title">Tests</h2></div><div class="cloud-heading-actions"><button class="small-button" id="new-test-button" type="button">New test</button></div></div>
+            <div class="section-heading"><div><p class="section-kicker">REUSABLE QUESTION SETS</p><h2 id="tests-title">Tests</h2></div><div class="cloud-heading-actions"><button class="small-button" id="open-question-builder-button" type="button" hidden>Manage questions</button><button class="small-button" id="new-test-button" type="button">New test</button></div></div>
             <form id="test-settings-form" class="cloud-form" hidden>
               <label for="test-title-input">Test title</label>
               <input id="test-title-input" maxlength="100" placeholder="e.g. Biology: cells" required />
@@ -66,18 +65,6 @@
             <p class="empty-state" id="no-tests-message" hidden>No tests yet. Create a reusable test to begin.</p>
             <button class="secondary-button import-legacy-button" id="import-local-tests" type="button" hidden>Import tests from this browser</button>
             <p class="secure-message" id="teacher-message" role="status" aria-live="polite"></p>
-          </section>
-
-          <section class="question-list-panel question-builder-panel" aria-labelledby="question-editor-title">
-            <div class="section-heading"><div><p class="section-kicker">TEST BUILDER</p><h2 id="question-editor-title">Questions</h2></div><span class="quiz-count" id="selected-test-total"></span></div>
-            <p class="empty-state" id="select-test-message">Choose or create a test to edit its questions.</p>
-            <div class="question-builder-layout">
-              <section class="question-overview" aria-label="Question overview">
-                <div class="section-heading"><h3>Question overview</h3><button class="secondary-button add-cloud-question" id="add-question-button" type="button" hidden>Add question</button></div>
-                <p class="empty-state" id="question-overview-empty">Questions you add will appear here.</p>
-                <div id="test-question-list" class="teacher-question-list"></div>
-              </section>
-            </div>
           </section>
 
           <section class="question-list-panel session-panel" aria-labelledby="sessions-title">
@@ -95,19 +82,26 @@
     </main>
 
     <dialog class="question-editor-dialog" id="question-editor-dialog" aria-labelledby="question-form-heading">
-      <form id="cloud-question-form" class="cloud-form question-editor-form">
-        <div class="section-heading"><div><p class="section-kicker">TEST BUILDER</p><h2 id="question-form-heading">Add a question</h2></div><button class="icon-button" id="close-question-editor" type="button" aria-label="Close question editor">×</button></div>
-        <label for="question-prompt">Question</label>
-        <textarea id="question-prompt" rows="3" maxlength="1000" required></textarea>
-        <div class="form-two-column">
-          <div><label for="question-type">Answer type</label><select id="question-type"><option value="choice">Multiple choice</option><option value="multi">Select all that apply</option><option value="truefalse">True or false</option></select></div>
-          <div><label for="question-marks">Marks</label><select id="question-marks"><option value="2">2 marks</option><option value="5">5 marks</option><option value="10">10 marks</option></select></div>
-        </div>
-        <label for="question-time">Time limit</label><select id="question-time"><option value="15">15 seconds</option><option value="30">30 seconds</option><option value="60">1 minute</option><option value="90">1 minute 30 seconds</option><option value="120">2 minutes</option></select>
-        <div id="question-type-editor"></div>
-        <p class="secure-message" id="question-editor-message" role="status"></p>
-        <div class="inline-form-row question-builder-actions"><button class="primary-button" id="save-question-button" type="submit">Add question</button><button class="secondary-button" id="finish-test-button" type="button">Finish / save test</button></div>
-      </form>
+      <div class="question-builder-layout">
+        <section class="question-overview" aria-label="Question overview">
+          <div class="section-heading"><div><p class="section-kicker">TEST BUILDER</p><h2>Question overview</h2></div><span class="quiz-count" id="selected-test-total"></span></div>
+          <p class="empty-state" id="question-overview-empty">Questions you add will appear here.</p>
+          <div id="test-question-list" class="teacher-question-list"></div>
+        </section>
+        <form id="cloud-question-form" class="cloud-form question-editor-form">
+          <div class="section-heading"><div><p class="section-kicker">QUESTION DETAILS</p><h2 id="question-form-heading">Add a question</h2></div><button class="icon-button" id="close-question-editor" type="button" aria-label="Close question editor">×</button></div>
+          <label for="question-prompt">Question</label>
+          <textarea id="question-prompt" rows="3" maxlength="1000" required></textarea>
+          <div class="form-two-column">
+            <div><label for="question-type">Answer type</label><select id="question-type"><option value="choice">Multiple choice</option><option value="multi">Select all that apply</option><option value="truefalse">True or false</option></select></div>
+            <div><label for="question-marks">Marks</label><select id="question-marks"><option value="2">2 marks</option><option value="5">5 marks</option><option value="10">10 marks</option></select></div>
+          </div>
+          <label for="question-time">Time limit</label><select id="question-time"><option value="15">15 seconds</option><option value="30">30 seconds</option><option value="60">1 minute</option><option value="90">1 minute 30 seconds</option><option value="120">2 minutes</option></select>
+          <div id="question-type-editor"></div>
+          <p class="secure-message" id="question-editor-message" role="status"></p>
+          <div class="inline-form-row question-builder-actions"><button class="primary-button" id="save-question-button" type="submit">Add question</button><button class="secondary-button" id="finish-test-button" type="button">Finish / save test</button></div>
+        </form>
+      </div>
     </dialog>
 
     <dialog class="quiz-modal" id="student-quiz-dialog">
